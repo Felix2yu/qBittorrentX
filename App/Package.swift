@@ -16,7 +16,7 @@ let package = Package(
     targets: [
         .target(
             name: "QBittorrentXUI",
-            dependencies: [.product(name: "QBKit", package: "QBKit")],
+            dependencies: [.product(name: "QBKit", package: "qBittorrentX")],
             path: "Sources/QBittorrentXUI"
         ),
         .executableTarget(

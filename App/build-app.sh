@@ -8,7 +8,7 @@ APP_NAME="qBittorrentX"
 BUILD_DIR=".build/release"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
-echo "构建 $APP_NAME（release）…"
+echo "构建 ${APP_NAME}（release）…"
 swift build -c release -Xswiftc -disable-sandbox
 
 rm -rf "$APP_BUNDLE"
