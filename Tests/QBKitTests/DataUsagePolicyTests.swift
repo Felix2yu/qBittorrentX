@@ -25,4 +25,13 @@ struct DataUsagePolicyTests {
             usage: .auto, isExpensive: false, isConstrained: false, canUseIncrementalSync: true
         ) == .full)
     }
+
+    @Test func 全量体积估算贴着实测数字且无快照时不编数() throws {
+        // 真机实测：7283 条 = 27.45 MB（28,783,411 B）。估算偏差控制在 10% 内才有参考价值。
+        let 实测: Int64 = 28_783_411
+        let 估算 = try #require(DataUsagePolicy.estimatedFullPullBytes(loadedCount: 7283))
+        #expect(abs(Double(估算 - 实测)) / Double(实测) < 0.1)
+        // 没有磁盘快照就不知道服务端有多少条，返回 nil，UI 不能摆一个编出来的数字。
+        #expect(DataUsagePolicy.estimatedFullPullBytes(loadedCount: 0) == nil)
+    }
 }

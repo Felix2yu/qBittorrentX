@@ -59,7 +59,7 @@ struct SyncEngineTests {
     }
 
     private func engine(
-        _ cache: SnapshotCache, url: String? = nil, apiKey: String = ""
+        _ cache: SnapshotCache, url: String? = nil, apiKey: String = "", approval: Bool = false
     ) -> SyncEngine {
         SyncEngine(
             client: QBClient(
@@ -68,7 +68,8 @@ struct SyncEngineTests {
                 ),
                 session: FakeQBServer.makeSession()
             ),
-            cache: cache
+            cache: cache,
+            requiresFullPullApproval: approval
         )
     }
 
@@ -355,6 +356,11 @@ struct SyncEngineTests {
         #expect(s.errorMessage?.contains("暂停自动同步") == true)
         // 数据已经下下来了，照常显示，不能因为暂停就清空。
         #expect(s.rows.count == 2)
+
+        // 暂停后单轮 refresh 同样不联网：CLI 逐轮调的就是 refresh，不能绕过暂停。
+        let 暂停后请求数 = FakeQBServer.requests(base: base).count
+        await e.refresh()
+        #expect(FakeQBServer.requests(base: base).count == 暂停后请求数)
         await e.stop()
     }
 
@@ -381,6 +387,93 @@ struct SyncEngineTests {
         #expect(FakeQBServer.requests(base: base).count > 暂停时请求数 + 1)
         #expect(await e.currentSnapshot().errorMessage == nil)
         await e.stop()
+    }
+
+    /// 自动判定看不穿 TUN 代理下的计费热点，所以完整档首次全量必须由用户点头。
+    /// 拦下时**一个字节都不能发**：连登录都不该有。
+    @Test func 完整档首次联网前被闸门拦下且零请求() async throws {
+        FakeQBServer.reset(base: base) { request in
+            登录响应(request) ?? .json(全量首轮)
+        }
+        let e = engine(新缓存(), approval: true)
+        await e.setIntervals(full: 0.5, lite: 30)
+        await e.refresh()
+        var s = await e.currentSnapshot()
+        #expect(s.needsFullPullApproval == true)
+        #expect(s.loadedCount == 0)
+        #expect(FakeQBServer.requests(base: base).isEmpty)
+
+        // 轮询也不能绕过闸门。
+        await e.start()
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(FakeQBServer.requests(base: base).isEmpty)
+        await e.stop()
+
+        await e.approveFullPull()
+        await e.refresh()
+        s = await e.currentSnapshot()
+        #expect(s.needsFullPullApproval == false)
+        #expect(s.rows.count == 2)
+        #expect(!FakeQBServer.requests(base: base).isEmpty)
+    }
+
+    /// 拦下不等于白屏：磁盘快照照常显示，用户看着缓存数据决定要不要下载。
+    @Test func 闸门拦下时磁盘快照照常显示() async throws {
+        FakeQBServer.reset(base: base) { request in
+            登录响应(request) ?? .json(全量首轮)
+        }
+        let cache = 新缓存()
+        let 写盘 = engine(cache)
+        await 写盘.refresh()
+        await 写盘.persist(force: true)
+
+        let e = engine(cache, approval: true)
+        await e.restoreFromCache()
+        let s = await e.currentSnapshot()
+        #expect(s.loadedCount == 2)
+        #expect(s.isFromCache == true)
+        #expect(s.needsFullPullApproval == true)
+        // 只有写盘那次的登录 + maindata，装回缓存本身零网络。
+        #expect(FakeQBServer.requests(base: base).count == 2)
+    }
+
+    @Test func 省流量档不受闸门影响且切档即解除() async throws {
+        FakeQBServer.reset(base: base) { request in
+            if let r = 登录响应(request) { return r }
+            if request.url?.path == "/api/v2/transfer/info" { return .json(传输信息) }
+            return .json(运行中列表)
+        }
+        let e = engine(新缓存(), approval: true)
+        await e.refresh()
+        #expect(await e.currentSnapshot().needsFullPullApproval == true)
+
+        // 切档立刻解除，不用等下一轮。
+        await e.setMode(.lite)
+        #expect(await e.currentSnapshot().needsFullPullApproval == false)
+        await e.refresh()
+        let s = await e.currentSnapshot()
+        #expect(s.needsFullPullApproval == false)
+        #expect(s.runningHashes == ["h1"])
+        #expect(!FakeQBServer.requests(base: base).isEmpty)
+    }
+
+    /// 换服务器就是换一份未知体积，之前的批准不能沿用。
+    @Test func 换服务器后全量批准作废() async throws {
+        FakeQBServer.reset(base: base) { request in
+            登录响应(request) ?? .json(全量首轮)
+        }
+        let e = engine(新缓存(), approval: true)
+        await e.approveFullPull()
+        await e.refresh()
+        #expect(await e.currentSnapshot().needsFullPullApproval == false)
+        let 换站前请求数 = FakeQBServer.requests(base: base).count
+
+        await e.applyCredentials(Credentials(
+            baseURL: "https://other.example.com", username: "admin", password: "pw"
+        ))
+        #expect(await e.currentSnapshot().needsFullPullApproval == true)
+        await e.refresh()
+        #expect(FakeQBServer.requests(base: base).count == 换站前请求数)
     }
 
     /// 回归：updateTraffic 曾经定义了但没人调用，快照里的流量恒为 0。

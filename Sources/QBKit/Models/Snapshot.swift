@@ -69,13 +69,16 @@ public struct Snapshot: Hashable, Sendable {
     public var runningHashes: Set<String>
     /// 最近一次同步失败的原因。 nil 表示正常。UI 要显示出来，不能静默假装在线。
     public var errorMessage: String?
+    /// 完整档首次联网被闸门拦下，等用户确认。UI 据此弹确认框；此时一个字节都没发。
+    public var needsFullPullApproval: Bool
 
     public init(
         rows: [Torrent] = [], facets: Facets = Facets(), serverState: ServerState = ServerState(),
         categories: [Category] = [], tags: [String] = [], mode: SyncMode = .full,
         loadedCount: Int = 0, totalCount: Int? = nil, updatedAt: Date = .distantPast,
         isFromCache: Bool = false, traffic: TrafficStats = TrafficStats(),
-        runningHashes: Set<String> = [], errorMessage: String? = nil
+        runningHashes: Set<String> = [], errorMessage: String? = nil,
+        needsFullPullApproval: Bool = false
     ) {
         self.rows = rows
         self.facets = facets
@@ -90,5 +93,6 @@ public struct Snapshot: Hashable, Sendable {
         self.traffic = traffic
         self.runningHashes = runningHashes
         self.errorMessage = errorMessage
+        self.needsFullPullApproval = needsFullPullApproval
     }
 }

@@ -20,12 +20,20 @@ public enum DataUsagePolicy {
         guard canUseIncrementalSync else { return .lite }
         return mode(usage: usage, isExpensive: isExpensive, isConstrained: isConstrained)
     }
+
+    /// 全量体积估算，给确认框用。真机实测 7283 条 = 27.45 MB，约 4 KB/条。
+    /// 条数只能来自磁盘快照：没有快照就不知道服务端有多少条，返回 nil，UI 不能编一个数字。
+    public static func estimatedFullPullBytes(loadedCount: Int) -> Int64? {
+        loadedCount > 0 ? Int64(loadedCount) * 4096 : nil
+    }
 }
 
 /// 网络路径监测。路径变化时热切换档位，不需要重启。
 ///
-/// **未验证**：macOS 上 USB 共享网络/热点的 `isExpensive` 判定是否准确，
-/// 本机没有蜂窝网卡可测。判定不准时用户仍可在设置里显式覆盖。
+/// **实测局限**：接计费热点时，若默认路由走 TUN 代理，`NWPathMonitor` 报的是
+/// `isExpensive=false isConstrained=false`（路径里同时挂着 utun/wiredEthernet/wifi），
+/// 热点的 constrained 标志落在另一条 inactive 的接口上，读不到。
+/// 所以自动判定只能当参考，完整档首次全量另有一道用户确认闸门。
 public final class NetworkPathWatcher: @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "im.yufei.qbittorrentx.path")

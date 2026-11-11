@@ -46,14 +46,24 @@ public actor SyncEngine {
     /// 客户端每 2s 重下 27.45 MB，4 秒烧掉 54.90 MB，计费网络下是灾难。
     private var fullPullHalted = false
 
+    /// 完整档首次联网的闸门。自动判定看不穿 TUN 代理下的计费热点（实测 isExpensive=false），
+    /// 所以第一次全量必须由用户点头；批准只在本次运行内有效，重启后重新问。
+    private var fullPullApproved = false
+    /// 只用于发布短路比较：闸门状态变了才推快照，拦下期间不必每 2s 推一次同样的东西。
+    private var publishedNeedsApproval = false
+
     private var continuation: AsyncStream<Snapshot>.Continuation?
     private var loopTask: Task<Void, Never>?
     private var loopGeneration = 0
     private var lastTraffic = TrafficStats()
 
-    public init(client: QBClient, cache: SnapshotCache = SnapshotCache()) {
+    public init(
+        client: QBClient, cache: SnapshotCache = SnapshotCache(),
+        requiresFullPullApproval: Bool = true
+    ) {
         self.client = client
         self.cache = cache
+        self.fullPullApproved = !requiresFullPullApproval
     }
 
     // MARK: - 订阅
@@ -74,7 +84,8 @@ public actor SyncEngine {
             serverState: serverState, categories: decodedCategories(), tags: tags,
             mode: mode, loadedCount: torrents.count, totalCount: totalCount,
             updatedAt: updatedAt, isFromCache: isFromCache, traffic: lastTraffic,
-            runningHashes: mode == .lite ? runningHashes : [], errorMessage: errorMessage
+            runningHashes: mode == .lite ? runningHashes : [], errorMessage: errorMessage,
+            needsFullPullApproval: needsApproval
         )
     }
 
@@ -120,6 +131,8 @@ public actor SyncEngine {
         fullPullHalted = false
         errorMessage = nil
         if urlChanged {
+            // 换服务器就是换一份未知体积，之前的批准不作数。
+            fullPullApproved = false
             torrents = [:]
             serverStateRaw = nil
             categoriesRaw = [:]
@@ -179,6 +192,9 @@ public actor SyncEngine {
     // MARK: - 轮询
 
     public func start() {
+        // 显式要求继续轮询 = 解除「意外全量」暂停。必须在 guard 之前：
+        // 暂停后轮询可能还在睡最后一觉，那时 loopTask 非 nil，清不掉就再也起不来了。
+        fullPullHalted = false
         guard loopTask == nil else { return }
         loopGeneration += 1
         let myGeneration = loopGeneration
@@ -219,13 +235,32 @@ public actor SyncEngine {
         return mode == .full ? fullInterval : liteTransferInterval
     }
 
-    /// 手动刷新 / 单轮同步。手动刷新是显式用户动作，解除「意外全量」暂停。
+    /// 单轮同步。**不解除暂停**：CLI 逐轮调的就是它，若顺手清掉暂停标志，
+    /// 服务端恒回全量时每轮都会重下 27 MB。要继续自动轮询得显式调 start()。
     public func refresh() async {
-        fullPullHalted = false
         await runRefresh()
     }
 
+    public func isFullPullHalted() -> Bool { fullPullHalted }
+
+    private var needsApproval: Bool { mode == .full && !fullPullApproved }
+
+    /// 用户确认了首次全量。只对本次运行有效：下次启动网络可能已经换成计费热点。
+    public func approveFullPull() {
+        fullPullApproved = true
+    }
+
     private func runRefresh() async {
+        // 闸门：完整档首次联网前一个字节都不发，只把「需要确认」推给 UI。
+        let 拦下 = needsApproval
+        if 拦下 != publishedNeedsApproval {
+            publishedNeedsApproval = 拦下
+            publish()
+        }
+        if 拦下 { return }
+        // 暂停期间单轮刷新也不联网：否则 CLI 的逐轮循环会绕过暂停，每轮重下全量。
+        if fullPullHalted { return }
+
         let myGen = gen
         var 失败原因: String?
         do {
