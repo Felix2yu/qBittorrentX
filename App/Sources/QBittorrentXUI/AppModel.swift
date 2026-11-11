@@ -21,8 +21,8 @@ public final class AppModel {
     public var busyHashes: Set<String> = []
     public var actionError: String?
     public var isRefreshing = false
-    /// 「加载全部」的确认框。省流量档下点它才会拉全量。
-    public var isConfirmingLoadAll = false
+    /// 全量下载确认框。两个来源共用一个：省流量档点「加载全部」，或完整档首次联网被引擎拦下。
+    public var isConfirmingFullPull = false
     /// 所有弹框走这一个入口：同一个视图上挂两个 .sheet 会互相吞掉。
     public var activeSheet: ActionSheet?
 
@@ -65,7 +65,12 @@ public final class AppModel {
         let store = CredentialStore()
         let credentials = store.load()
         client = QBClient(credentials: credentials)
-        engine = SyncEngine(client: client)
+        // 没配服务器时没什么可下载的，别拿确认框挡住「地址无效」的提示。
+        // 之后在设置里填了地址，applyCredentials 会把批准作废，闸门重新生效。
+        engine = SyncEngine(
+            client: client,
+            requiresFullPullApproval: !credentials.normalizedBaseURL.isEmpty
+        )
         canUseIncrementalSync = credentials.canUseIncrementalSync
         inspectorVisible = settings.inspectorVisible
         dataUsage = settings.dataUsage
@@ -136,13 +141,50 @@ public final class AppModel {
     }
 
     /// 省流量档下唯一的升级入口。**不自动升级**，且必须先让用户知道要下载多少。
-    public func loadAll() {
-        dataUsage = .full
-        applyDataUsage()
+    public func requestLoadAll() {
+        isConfirmingFullPull = true
+    }
+
+    /// 确认下载全量。当前是省流量档说明这是一次升级，把偏好写成完整；
+    /// 完整档被闸门拦下时只批准本次运行，不动偏好——自动档下次启动仍按网络重新判定。
+    public func confirmFullPull() {
+        isConfirmingFullPull = false
+        if snapshot.mode == .lite {
+            dataUsage = .full
+            applyDataUsage()
+        }
         Task {
+            // applyDataUsage 的 setMode 在另一个 Task 里，这里再喊一次保证顺序（setMode 幂等）。
+            await engine.setMode(resolvedMode())
+            await engine.approveFullPull()
             await engine.refresh()
             await engine.start()
         }
+    }
+
+    /// 拒绝全量：完整档降为省流量档继续用（实测 264 B/2s），省流量档则什么都不改。
+    public func declineFullPull() {
+        isConfirmingFullPull = false
+        guard snapshot.mode == .full else { return }
+        dataUsage = .lite
+        applyDataUsage()
+    }
+
+    /// 确认框里的体积数字。条数只能来自磁盘快照，没有快照就说未知，不编一个数字。
+    public var fullPullEstimate: String {
+        if let bytes = DataUsagePolicy.estimatedFullPullBytes(loadedCount: snapshot.loadedCount) {
+            return "约 \(ByteFormat.bytes(bytes))"
+        }
+        return "体积未知"
+    }
+
+    public var fullPullWarning: String {
+        if snapshot.mode == .lite {
+            return "当前是省流量档，只实时刷新运行中的任务。加载全部会一次性下载 \(fullPullEstimate)，"
+                + "之后每 2s 只取增量（实测 7–8 KB）。计费网络下请留意。"
+        }
+        return "完整档首次同步要一次性下载 \(fullPullEstimate)（实测 7283 条为 27.45 MB）。"
+            + "自动判定看不穿代理/VPN，无法确认当前是否计费网络；改用省流量档只需 264 B/2s。"
     }
 
     /// 只有 API key 时增量为假，UI 要说明为什么档位选不动。

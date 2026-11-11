@@ -28,11 +28,17 @@ public struct RootView: View {
         .sheet(item: $model.activeSheet) { sheet in
             ActionSheetView(model: model, sheet: sheet)
         }
-        .confirmationDialog("加载全部任务？", isPresented: $model.isConfirmingLoadAll) {
-            Button("加载全部（约 21–29 MB）") { model.loadAll() }
-            Button("取消", role: .cancel) {}
+        .confirmationDialog("下载全部任务？", isPresented: $model.isConfirmingFullPull) {
+            Button("下载全部（\(model.fullPullEstimate)）") { model.confirmFullPull() }
+            Button(model.snapshot.mode == .lite ? "取消" : "改用省流量档", role: .cancel) {
+                model.declineFullPull()
+            }
         } message: {
-            Text("当前是省流量档，只实时刷新运行中的任务。加载全部会一次性下载约 21–29 MB，计费网络下请留意。")
+            Text(model.fullPullWarning)
+        }
+        // 引擎拦下首次全量时弹框。取消即降为省流量档，所以这里只负责打开。
+        .onChange(of: model.snapshot.needsFullPullApproval) { _, needs in
+            if needs { model.isConfirmingFullPull = true }
         }
         .task { await model.bootstrap() }
     }
@@ -84,7 +90,7 @@ public struct RootView: View {
             }
 
             if model.snapshot.mode == .lite {
-                Button("加载全部") { model.isConfirmingLoadAll = true }
+                Button("加载全部") { model.requestLoadAll() }
             }
 
             Button {
