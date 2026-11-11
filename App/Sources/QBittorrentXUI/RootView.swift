@@ -1,0 +1,176 @@
+import QBKit
+import SwiftUI
+
+public struct RootView: View {
+    @Bindable var model: AppModel
+    @AppStorage(Settings.Key.columns) private var columns = TableColumnCustomization<Torrent>()
+
+    public init(model: AppModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        NavigationSplitView {
+            SidebarView(model: model)
+        } detail: {
+            TorrentTableView(model: model, columns: $columns)
+                .searchable(text: $model.query.search, placement: .toolbar, prompt: "搜索名称")
+                .toolbar { toolbarContent }
+                .inspector(isPresented: $model.inspectorVisible) {
+                    TorrentInspector(torrents: model.selectedTorrents)
+                        .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+                }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar(model: model) }
+        .onChange(of: model.query) { model.applyQuery() }
+        .onChange(of: model.sortOrder) { model.applySort() }
+        .onChange(of: model.inspectorVisible) { model.applyInspectorVisible() }
+        .sheet(item: $model.activeSheet) { sheet in
+            ActionSheetView(model: model, sheet: sheet)
+        }
+        .confirmationDialog("加载全部任务？", isPresented: $model.isConfirmingLoadAll) {
+            Button("加载全部（约 21–29 MB）") { model.loadAll() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("当前是省流量档，只实时刷新运行中的任务。加载全部会一次性下载约 21–29 MB，计费网络下请留意。")
+        }
+        .task { await model.bootstrap() }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .disabled(model.isRefreshing)
+            .help("立即刷新")
+
+            Button {
+                model.perform(.start, hashes: Array(model.selection))
+            } label: {
+                Image(systemName: "play")
+            }
+            .disabled(!canAct)
+            .help("开始")
+
+            Button {
+                model.perform(.stop, hashes: Array(model.selection))
+            } label: {
+                Image(systemName: "pause")
+            }
+            .disabled(!canAct)
+            .help("停止")
+
+            Menu {
+                Button("强制校验") { model.perform(.recheck, hashes: Array(model.selection)) }
+                    .disabled(!canAct)
+                Divider()
+                Button("设置分类…") { model.activeSheet = .category(Array(model.selection)) }
+                    .disabled(!canAct)
+                Button("设置标签…") { model.activeSheet = .tags(Array(model.selection)) }
+                    .disabled(!canAct)
+                Button("上传限速…") { model.activeSheet = .limit(Array(model.selection)) }
+                    .disabled(!canAct)
+                Divider()
+                Button("删除…", role: .destructive) {
+                    model.activeSheet = .delete(Array(model.selection))
+                }
+                .disabled(!canAct)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+
+            if model.snapshot.mode == .lite {
+                Button("加载全部") { model.isConfirmingLoadAll = true }
+            }
+
+            Button {
+                model.inspectorVisible.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .help("显示/隐藏详情")
+        }
+    }
+
+    private var canAct: Bool {
+        !model.selection.isEmpty && !model.selection.contains { model.busyHashes.contains($0) }
+    }
+}
+
+/// 底部单行状态栏。省流量档必须说实话：只覆盖运行中那批，其余是缓存。
+struct StatusBar: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let error = model.snapshot.errorMessage ?? model.actionError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(error).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .font(.callout)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                Divider()
+            }
+            HStack(spacing: 8) {
+                let state = model.snapshot.serverState
+                Text("↓ \(ByteFormat.speed(state.dlInfoSpeed))").monospacedDigit()
+                Text("↑ \(ByteFormat.speed(state.upInfoSpeed))").monospacedDigit()
+                separator
+                Text(countText).monospacedDigit()
+                if !model.selection.isEmpty {
+                    separator
+                    Text("已选 \(model.selection.count)").monospacedDigit()
+                }
+                separator
+                Text(modeText)
+                if model.snapshot.isFromCache {
+                    separator
+                    Text(cacheText).foregroundStyle(.orange)
+                }
+                Spacer(minLength: 8)
+                Text("本次 \(ByteFormat.bytes(model.snapshot.traffic.totalBytes))")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .help("本次启动以来向服务器请求的字节数")
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+        .background(.bar)
+    }
+
+    private var separator: some View {
+        Divider().frame(height: 11)
+    }
+
+    private var countText: String {
+        let s = model.snapshot
+        if s.mode == .lite {
+            return "运行中 \(s.runningHashes.count) · 缓存 \(s.loadedCount)"
+        }
+        return "\(s.rows.count)/\(s.loadedCount) 个任务"
+    }
+
+    private var modeText: String {
+        let s = model.snapshot
+        if s.mode == .lite {
+            return "省流量 · \(Int(model.liteInterval))s"
+        }
+        return "完整 · \(Int(Settings.defaultFullInterval))s"
+    }
+
+    private var cacheText: String {
+        let age = Date().timeIntervalSince(model.snapshot.updatedAt)
+        if age < 60 { return "缓存 · 刚刚" }
+        if age < 3600 { return "缓存 · \(Int(age / 60)) 分钟前" }
+        return "缓存 · \(Int(age / 3600)) 小时前"
+    }
+}
