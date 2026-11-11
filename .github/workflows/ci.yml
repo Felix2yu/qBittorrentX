@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: 核心包构建与测试
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      # macos-26 是稳定镜像，默认 Xcode 26.6（macOS 26.5 SDK），
+      # 足以覆盖 Package.swift 的最低版本 macOS 26。xcode-27 仍是预览标签，不用于 CI。
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 核对工具链
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # 不用 make test：Makefile 里的 -load-plugin-library 是 CommandLineTools 的补丁路径，
+      # Xcode 工具链自带 TestingMacros，直接 swift test 即可。
+      - name: 构建核心包
+        run: swift build -Xswiftc -disable-sandbox
+
+      - name: 运行测试
+        run: swift test -Xswiftc -disable-sandbox
+
+  app:
+    name: App release 打包
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 构建 .app
+        working-directory: App
+        run: ./build-app.sh
+
+      - name: 上传 .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: qBittorrentX-app
+          path: App/.build/release/qBittorrentX.app
+          if-no-files-found: error
+          retention-days: 7
