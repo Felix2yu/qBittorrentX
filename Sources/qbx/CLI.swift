@@ -62,9 +62,11 @@ struct QBX {
           --interval N        省流量档的任务列表间隔秒数（默认 30，范围 5–300）
           --full-interval N   完整档的增量间隔秒数（默认 2）
           --no-cache          跳过磁盘快照，强制冷启动
+          --yes               批准首次全量（真机实测 7283 条 = 27.45 MB）；不加则拒绝跑完整档
 
         restart-test 选项：
           --wait [N]          两段之间等待 N 秒模拟关机（默认 5）
+          --yes               批准两次全量下载（合计约 55 MB），不加则拒绝执行
 
         list 选项：
           --all               拉全表（约 21 MB），默认只拉运行中（约 93 KB）
@@ -85,7 +87,7 @@ struct QBX {
           --remove a,b        tags 只删
           --up N              limit 用的字节/秒，0 表示无限制
           --delete-files      delete 时连磁盘文件一起删（默认不删）
-          --yes               delete 的二次确认
+          --yes               delete 的二次确认；sync / restart-test 用它批准全量下载
 
         config 选项：
           --url URL           服务器地址
@@ -101,7 +103,8 @@ struct QBX {
           qbx config --url https://bt.example.com --username admin --password '…'
           qbx probe
           qbx sync --lite --rounds 10 --interval 60
-          qbx restart-test --wait 10
+          qbx sync --full --yes --rounds 3
+          qbx restart-test --wait 10 --yes
           QBX_URL=https://bt.example.com QBX_USERNAME=admin QBX_PASSWORD='…' qbx probe
         """)
     }

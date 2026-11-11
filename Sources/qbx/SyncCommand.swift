@@ -67,6 +67,18 @@ enum SyncCommand {
             }
         }
         print("")
+        // CLI 没有弹框，--yes 就是那道确认：完整档首次全量实测 27.45 MB，不能默认就下。
+        if mode == .full {
+            if args.has("yes") {
+                await engine.approveFullPull()
+            } else {
+                let s = await engine.currentSnapshot()
+                print("完整档首次全量需要确认：\(全量估算说明(s.loadedCount))。")
+                print("批准并继续：qbx sync --full --yes")
+                print("只看运行中任务（实测 91.83 KB）：qbx sync --lite")
+                exit(1)
+            }
+        }
         print("轮次  档位  rid    已加载  变更  本轮字节    累计流量   耗时     内存")
         print(String(repeating: "-", count: 86))
 
@@ -85,7 +97,10 @@ enum SyncCommand {
                 + 上一轮.keys.reduce(0) { $0 + (当前[$1] == nil ? 1 : 0) }
             上一轮 = 当前
 
-            if let err = s.errorMessage {
+            if s.needsFullPullApproval {
+                // 路径变化把档位切到完整档，但本次运行没批准过全量。
+                print("\(pad("\(轮次)", 4))  \(pad(s.mode.rawValue, 4))  等待全量确认，未发请求（重跑加 --yes）")
+            } else if let err = s.errorMessage {
                 print("\(pad("\(轮次)", 4))  \(pad(s.mode.rawValue, 4))  同步失败：\(err)")
             } else {
                 print(
@@ -97,6 +112,11 @@ enum SyncCommand {
                     + pad(String(format: "%.2fs", 耗时), 7) + "  "
                     + String(format: "%.1f MB", 常驻内存())
                 )
+            }
+
+            if await engine.isFullPullHalted() {
+                print("服务端恒回全量，已停止后续轮次——再跑下去每轮都要重下全量。")
+                break
             }
 
             if 轮数上限 != 0 && 轮次 >= 轮数上限 { break }
@@ -128,6 +148,12 @@ enum SyncCommand {
         }
         guard credentials.canUseIncrementalSync else {
             print("只有 API key 时没有 cookie 会话，rid 无从续传——本测试不适用。")
+            exit(1)
+        }
+        // 本测试刻意拉两次全量：真机实测单次 27.45 MB，续传失败时合计 54.90 MB。
+        guard args.has("yes") else {
+            print("本测试会拉两次全量（实测单次 27.45 MB，合计约 55 MB）。")
+            print("确认要继续：qbx restart-test --yes")
             exit(1)
         }
 
@@ -187,6 +213,13 @@ enum SyncCommand {
             report(error)
             exit(1)
         }
+    }
+
+    private static func 全量估算说明(_ loadedCount: Int) -> String {
+        if let bytes = DataUsagePolicy.estimatedFullPullBytes(loadedCount: loadedCount) {
+            return "约 \(ByteFormat.bytes(bytes))（按磁盘快照 \(loadedCount) 条估算）"
+        }
+        return "体积未知——没有磁盘快照就不知道服务端有多少条（实测 7283 条为 27.45 MB）"
     }
 
     private static func pad(_ s: String, _ width: Int) -> String {
