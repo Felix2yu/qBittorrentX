@@ -139,7 +139,10 @@ public final class AppModel {
     public func loadAll() {
         dataUsage = .full
         applyDataUsage()
-        Task { await engine.refresh() }
+        Task {
+            await engine.refresh()
+            await engine.start()
+        }
     }
 
     /// 只有 API key 时增量为假，UI 要说明为什么档位选不动。
@@ -175,6 +178,8 @@ public final class AppModel {
         isRefreshing = true
         Task {
             await engine.refresh()
+            // 引擎遇到「服务端恒回全量」会自己停轮询，手动刷新是重试信号，要把它重新起来。
+            await engine.start()
             isRefreshing = false
         }
     }
