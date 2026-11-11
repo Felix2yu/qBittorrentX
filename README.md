@@ -92,6 +92,21 @@ qbx help                       # 全部子命令与选项
 9. **`Settings` 的 setter 必须 `nonmutating`**：它只是 UserDefaults 的门面，否则 `let settings = Settings()` 连配置都改不了。
 10. **`QueryPipeline` 与 Table comparator 的 `savePath` 排序口径必须一致**：一处用裸 `<`、一处用 `.localizedStandard`，`Season10` 与 `Season2` 的先后就相反。已统一为 `localizedStandard` 并加断言全 18 字段行序一致的测试。
 
+## 每个提交都能 build + test
+
+每个提交都在临时 worktree 里单独 checkout 后跑 `swift build --build-tests` + `swift test`，**fail=0**。收尾那轮覆盖 14 个提交，测试数随提交递增：33 → 65 → 113 → 115 → 133 → 135 → 143 → **146（24 个套件）**。
+
+第一版历史有四处真缺陷，全是同一类——**文件按目录分模块，但依赖不按目录走**：
+
+| 缺陷 | 症状 | 修法 |
+|---|---|---|
+| manifest 提前声明 `qbx` 可执行目标 | 前 8 个提交连 manifest 都解析不了：`invalid custom path 'Sources/qbx'` | manifest 随 CLI 演进，可执行目标第 9 个提交才声明 |
+| `Maindata.swift:73` 调 `TorrentMerger.injectHash` | 第 2–5 个提交 `cannot find 'TorrentMerger' in scope` | `TorrentMerger` 与模型同批 |
+| `Snapshot.swift:20` 的 `Facets.status` 键是 `TorrentFilter` | 第 2 个提交 `cannot find type 'TorrentFilter' in scope`，连带 `Facets` 不满足 Hashable | `TorrentFilter` 只依赖 Torrent/TorrentState，与模型同批 |
+| `NetTests.swift` 里塞着 `DataUsagePolicyTests`（测的是 Sync 与 Store） | 第 4–5 个提交 `cannot find 'DataUsagePolicy' in scope` | 拆成 `DataUsagePolicyTests`（随同步）、`SettingsTests`（随存储），NetTests 只留 `CredentialsTests`；`makeTorrent` 抽成 `TorrentFixture.swift` 随模型 |
+
+**教训：靠「跑一遍看哪步红」找这类缺陷太慢**（一轮 5 分钟，跑了三轮）。改成先做静态依赖检查：扫出所有顶层声明建「名字 → 文件」表，再对每个提交的文件集算出「已提交的名字」，逐文件找引用了但尚未提交的项目内名字（剥掉注释与字符串避免误报）。一次就列出全部四处，确认修正后的分配零缺依赖，然后才重建历史、跑一次真实逐提交验证收尾。
+
 ## 到有 Xcode 的机器上：验收清单
 
 **本机没有编译过任何 SwiftUI 视图，也没有目视过任何界面。** 已验证的只有：`AppModel` 的 Swift 6 严格并发 typecheck（`make check-model`）、以及每个用到的 SwiftUI API 签名都对着 SDK 的 `.swiftinterface` 核对过。
@@ -128,7 +143,7 @@ open .build/release/qBittorrentX.app
 2. **cookie + rid 跨进程续传在真机上能否免掉全量**：本机假服务器上成立（`full_update=false`、8.59 KB、未重登），但假服务器本来就是按「接受 rid」写的，**这只证明客户端管路正确，不证明真服务器行为**。
 3. **API key 的正确 header**：实测那台服务器对客户端出口 IP 免鉴权，带 `X-Webapi-Key`、带 `Authorization: Bearer`、完全不带鉴权头三者都返回完整数据，判定不了。故**双发两个头**兜底，换成开了鉴权的服务器后删掉无效的那个。401/403/重登嗅探分支只能靠 URLProtocol 桩覆盖。
 4. **ATS 对裸 IP http 的行为**：`NSAllowsLocalNetworking` 是否放行裸 IP 未验证，故留了 `NSAllowsArbitraryLoads` 兜底。
-5. **`NWPathMonitor` 对 USB 共享网络/热点的 `isExpensive` 判定是否准确**：本机恒为 `false`，热切换分支只有桩级测试覆盖，**没有真实路径变化被触发过**。
+5. **`NWPathMonitor` 对 USB 共享网络/热点的 `isExpensive` 判定是否准确**：本机活动路径恒为 `isExpensive=false isConstrained=false`，热切换分支只有桩级测试覆盖，**没有真实路径变化被触发过**。附带观察：`ifconfig` 里 `en1` 确实带 `constrained` 标志（低数据模式会体现在接口上），但它 `status: inactive`、没有 inet 地址、不是活动路径，所以仍无法据此验证判定准确性。改活动接口的低数据模式属于改用户网络设置，未做。
 6. **真机 payload 与耗时之外的端到端数字都来自本机假服务器**（合成 payload 3.05 MB，真实 maindata 28.78 MB，故绝对值偏小，比例关系可参考）：
 
    | 场景 | 实测 |
@@ -140,7 +155,7 @@ open .build/release/qBittorrentX.app
    | 省流量档只刷全局速度的一轮 | **201 B** |
    | 只有 API key + 显式 `--full` | 仍被强制降为省流量，14.68 KB，无全量请求 |
 
-7. **真机联调被网络阻塞，且不是 DNS 问题**：系统 DNS 把服务器域名解析到代理的 fake-IP 段，TLS 握手即断（`SSL_ERROR_SYSCALL`），`apple.com` 正常。绕过 DNS 也一样——公共 DNS（`dig @1.1.1.1` 与 `@223.5.5.5`）给出的是真实的局域网地址，`nc` 探 443 与 8989 均「连接成功」，但 `curl --resolve` 钉到该 IP 后 HTTPS 仍 `SSL_ERROR_SYSCALL`、明文 HTTP 8 s 超时零字节。本机存在 TUN 模式代理的 utun 接口，连裸 IP 的 TCP 也被接管；Cloudflare / Google 的 DoH 同样超时。**要联调得先让代理放行到服务器所在局域网的直连或关掉 TUN**——那是用户的网络配置，没有擅自改动。
+7. **真机联调被网络阻塞，根因是默认路由而不是 DNS**：系统 DNS 把服务器域名解析到代理的 fake-IP 段，TLS 握手即断（`SSL_ERROR_SYSCALL`），`apple.com` 正常。绕过 DNS 也一样——公共 DNS（`dig @1.1.1.1` 与 `@223.5.5.5`）给出的是真实的局域网地址，`nc -z` 探 443 与 8989 均「连接成功」，但 `curl --resolve` 钉到该 IP 后 HTTPS 仍 `SSL_ERROR_SYSCALL`、明文 HTTP 8 s 超时零字节；Cloudflare / Google 的 DoH 同样超时。`netstat -rn` 给出决定性证据：**默认路由走 TUN 模式代理的 utun 接口**，本机真实地址在另一张网卡上、与服务器不在同一网络，所以连裸 IP 的 TCP 也被代理接管，「连接成功」只是代理本地 accept，随后中继失败。最近一次复测（`curl -m 6 …/api/v2/app/version`）仍是 `http=000`、6 s 超时。**要联调得让代理放行/修好到服务器所在局域网的中继，或回到该网络**——那是用户的网络配置，没有擅自改动。
 
 ## 联调安全边界
 
