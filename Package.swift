@@ -7,10 +7,12 @@ let package = Package(
     name: "QBKit",
     platforms: [.macOS(.v26)],
     products: [
-        .library(name: "QBKit", targets: ["QBKit"])
+        .library(name: "QBKit", targets: ["QBKit"]),
+        .executable(name: "qbx", targets: ["qbx"])
     ],
     targets: [
         .target(name: "QBKit", path: "Sources/QBKit"),
+        .executableTarget(name: "qbx", dependencies: ["QBKit"], path: "Sources/qbx"),
         .testTarget(name: "QBKitTests", dependencies: ["QBKit"], path: "Tests/QBKitTests")
     ]
 )
