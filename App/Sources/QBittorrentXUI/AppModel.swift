@@ -75,6 +75,10 @@ public final class AppModel {
 
     // MARK: - 启动
 
+    /// 退出前落盘用。只暴露 actor 而不是整个 model：`applicationWillTerminate` 会阻塞主线程
+    /// 等落盘完成，若把 @MainActor 的 self 捕获进 Task，那个 Task 永远排不上主线程，直接死锁到超时。
+    public nonisolated var syncEngine: SyncEngine { engine }
+
     public func bootstrap() async {
         guard !didBootstrap else { return }
         didBootstrap = true

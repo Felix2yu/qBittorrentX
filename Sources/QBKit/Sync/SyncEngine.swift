@@ -186,9 +186,13 @@ public actor SyncEngine {
         }
     }
 
-    public func stop() {
+    /// 停止前必须强制落盘：persist 有 30s 节流，运行不足 30s 就退出会把**过期 rid** 留在盘上。
+    /// 真机实测过代价——盘上 rid=1 而服务端已到 rid=4，重启带旧 rid 请求被判过期，
+    /// 直接回 full_update 重下 27.45 MB，措施 2（rid 续传）完全失效。
+    public func stop() async {
         loopTask?.cancel()
         loopTask = nil
+        await persist(force: true)
     }
 
     /// 跑一轮，返回下一轮该等多久。

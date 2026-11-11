@@ -104,6 +104,7 @@ enum SyncCommand {
         }
 
         watcher.stop()
+        await engine.stop()
         let s = await engine.currentSnapshot()
         print("")
         print("累计 \(s.traffic.requestCount) 次请求 / \(ByteFormat.bytes(s.traffic.totalBytes))")

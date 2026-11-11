@@ -223,6 +223,34 @@ struct SyncEngineTests {
         #expect(s.rows.count == 1)
     }
 
+    /// 回归：上面那个测试手动 `persist(force: true)`，所以从没走过「跑几轮就退出」的真实路径。
+    /// persist 有 30s 节流，运行不足 30s 就退出会把**过期 rid** 留在盘上。真机代价实测过：
+    /// 盘上 rid=1 而服务端已到 rid=4，重启带旧 rid 被判过期，回 full_update 重下 27.45 MB。
+    @Test func 停止时强制落盘最新rid与同一轮的任务表() async throws {
+        let 轮次 = 计数()
+        FakeQBServer.reset(base: base) { request in
+            if let r = 登录响应(request) { return r }
+            return .json(轮次.next() == 1 ? 全量首轮 : 增量次轮)
+        }
+        let cache = 新缓存()
+        let e = engine(cache)
+        await e.refresh()
+        await e.refresh()
+        #expect(await e.debugState().rid == 2)
+        // 节流窗口内第二轮没写盘——这正是缺陷的前提，不是断言失败。
+        #expect(cache.load(serverURL: base)?.rid == 1)
+
+        await e.stop()
+
+        let 落盘 = try #require(cache.load(serverURL: base))
+        #expect(落盘.rid == 2)
+        // rid 与任务表必须出自同一轮，否则重启后会漏掉两轮之间的增量。
+        #expect(落盘.torrents.count == 1)
+        #expect(落盘.torrents["h1"]?.dlspeed == 999)
+        #expect(落盘.torrents["h2"] == nil)
+        #expect(落盘.cookie?.name == "QBT_SID_8989")
+    }
+
     @Test func 省流量档不写全量快照() async throws {
         FakeQBServer.reset(base: base) { request in
             if let r = 登录响应(request) { return r }
