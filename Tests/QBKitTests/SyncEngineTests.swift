@@ -34,6 +34,11 @@ private let 增量次轮 = """
  "server_state":{"dl_info_speed":55}}
 """
 
+/// 空闲轮：只有 rid 推进，什么都没变。真机上大部分轮次长这样。
+private let 空增量 = """
+{"rid":2}
+"""
+
 private let 传输信息 = """
 {"dl_info_speed":111,"up_info_speed":222,"dl_rate_limit":0,"up_rate_limit":0,
  "connection_status":"connected","dht_nodes":400}
@@ -331,6 +336,53 @@ struct SyncEngineTests {
         #expect(s.rows.count == 2)
     }
 
+    /// 回归：真机上服务端丢了游标后**每轮都回 full_update**，客户端每 2s 重下 27.45 MB，
+    /// 4 秒烧掉 54.90 MB。带着非 0 rid 拿回全量就必须停轮询，并把这件事告诉用户。
+    @Test func 服务端恒回全量时暂停自动轮询() async throws {
+        FakeQBServer.reset(base: base) { request in
+            登录响应(request) ?? .json(全量首轮)
+        }
+        let e = engine(新缓存())
+        await e.setIntervals(full: 0.5, lite: 30)
+        await e.start()
+        try await Task.sleep(for: .milliseconds(1600))
+
+        let 全量次数 = FakeQBServer.requests(base: base)
+            .filter { $0.path == "/api/v2/sync/maindata" }.count
+        // 冷启动 1 次 + 发现游标失效 1 次。不暂停的话 1.6s 内会打到 4 次。
+        #expect(全量次数 == 2)
+        let s = await e.currentSnapshot()
+        #expect(s.errorMessage?.contains("暂停自动同步") == true)
+        // 数据已经下下来了，照常显示，不能因为暂停就清空。
+        #expect(s.rows.count == 2)
+        await e.stop()
+    }
+
+    /// 暂停后手动刷新是显式用户动作：解除暂停，并且轮询要能重新起来。
+    @Test func 暂停后手动刷新能重新起轮询() async throws {
+        let 轮次 = 计数()
+        FakeQBServer.reset(base: base) { request in
+            if let r = 登录响应(request) { return r }
+            return .json(轮次.next() <= 2 ? 全量首轮 : 增量次轮)
+        }
+        let e = engine(新缓存())
+        await e.setIntervals(full: 0.5, lite: 30)
+        await e.start()
+        // 必须等轮询**真的退出**：置位后还要再走一个 interval 才 break。
+        // 抢在退出前刷新的话 start() 只是空操作，测不到「重启」这条路径。
+        try await Task.sleep(for: .milliseconds(1300))
+        #expect(await e.currentSnapshot().errorMessage != nil)
+        let 暂停时请求数 = FakeQBServer.requests(base: base).count
+
+        await e.refresh()
+        await e.start()
+        try await Task.sleep(for: .milliseconds(900))
+        // 轮询自己停下来时若不清 loopTask，这里的 start() 会被 guard 挡掉，请求数只 +1。
+        #expect(FakeQBServer.requests(base: base).count > 暂停时请求数 + 1)
+        #expect(await e.currentSnapshot().errorMessage == nil)
+        await e.stop()
+    }
+
     /// 回归：updateTraffic 曾经定义了但没人调用，快照里的流量恒为 0。
     @Test func 快照带出真实流量字节数() async throws {
         FakeQBServer.reset(base: base) { request in
@@ -350,8 +402,10 @@ struct SyncEngineTests {
             var items: [Snapshot] = []
             func add(_ s: Snapshot) { items.append(s) }
         }
+        let 轮次 = 计数()
         FakeQBServer.reset(base: base) { request in
-            登录响应(request) ?? .json(全量首轮)
+            if let r = 登录响应(request) { return r }
+            return .json(轮次.next() == 1 ? 全量首轮 : 空增量)
         }
         let e = engine(新缓存())
         let stream = await e.snapshots()
@@ -363,7 +417,7 @@ struct SyncEngineTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(await 收集器.items.count == 2)
 
-        // 同一份全量响应，rows 与 serverState 都没变 → 不该再推一次。
+        // 空增量：rows 与 serverState 都没变 → 不该再推一次。
         await e.refresh()
         try await Task.sleep(for: .milliseconds(100))
         消费.cancel()

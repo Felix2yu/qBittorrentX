@@ -41,8 +41,14 @@ public actor SyncEngine {
     /// 4.83 MB 的快照每 2 s 写一次纯属浪费磁盘，节流到 30 s。
     private let saveInterval: TimeInterval = 30
 
+    /// 带着非 0 rid 却收到 full_update 时置位，停掉自动轮询。
+    /// 真机实测过不置位的代价：服务端每次新建同步上下文、恒回全量，
+    /// 客户端每 2s 重下 27.45 MB，4 秒烧掉 54.90 MB，计费网络下是灾难。
+    private var fullPullHalted = false
+
     private var continuation: AsyncStream<Snapshot>.Continuation?
     private var loopTask: Task<Void, Never>?
+    private var loopGeneration = 0
     private var lastTraffic = TrafficStats()
 
     public init(client: QBClient, cache: SnapshotCache = SnapshotCache()) {
@@ -95,6 +101,7 @@ public actor SyncEngine {
         mode = new
         gen += 1
         rid = 0
+        fullPullHalted = false
         runningHashes = []
         lastTorrentFetch = .distantPast
         // 换档不删表：省流量档仍要显示缓存行，完整档回来时也不必从零开始。
@@ -110,6 +117,7 @@ public actor SyncEngine {
         await client.configure(new)
         gen += 1
         rid = 0
+        fullPullHalted = false
         errorMessage = nil
         if urlChanged {
             torrents = [:]
@@ -172,18 +180,27 @@ public actor SyncEngine {
 
     public func start() {
         guard loopTask == nil else { return }
+        loopGeneration += 1
+        let myGeneration = loopGeneration
         loopTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 let interval = await self.tick()
-                if interval <= 0 { return }
+                if interval <= 0 { break }
                 do {
                     try await Task.sleep(for: .seconds(interval))
                 } catch {
-                    return
+                    break
                 }
             }
+            await self?.loopDidStop(myGeneration)
         }
+    }
+
+    /// 自己停下来的轮询也要把 loopTask 清掉，否则下次 start() 被 guard 挡住，再也起不来。
+    /// 比代次号：stop() 后紧接着 start() 时，旧任务醒来不能把新任务的句柄抹掉。
+    private func loopDidStop(_ generation: Int) {
+        if generation == loopGeneration { loopTask = nil }
     }
 
     /// 停止前必须强制落盘：persist 有 30s 节流，运行不足 30s 就退出会把**过期 rid** 留在盘上。
@@ -195,14 +212,20 @@ public actor SyncEngine {
         await persist(force: true)
     }
 
-    /// 跑一轮，返回下一轮该等多久。
+    /// 跑一轮，返回下一轮该等多久。返回 0 表示停止自动轮询。
     private func tick() async -> TimeInterval {
-        await refresh()
+        if fullPullHalted { return 0 }
+        await runRefresh()
         return mode == .full ? fullInterval : liteTransferInterval
     }
 
-    /// 手动刷新 / 单轮同步。
+    /// 手动刷新 / 单轮同步。手动刷新是显式用户动作，解除「意外全量」暂停。
     public func refresh() async {
+        fullPullHalted = false
+        await runRefresh()
+    }
+
+    private func runRefresh() async {
         let myGen = gen
         var 失败原因: String?
         do {
@@ -227,10 +250,16 @@ public actor SyncEngine {
             Log.sync.error("同步失败：\(失败原因, privacy: .public)")
             publish()
         } else {
-            errorMessage = nil
+            // 暂停也要说出来：静默停轮询会让用户以为界面还在实时更新。
+            let 提示 = fullPullHalted
+                ? "服务端丢弃了增量游标，本轮重下全量 \(ByteFormat.bytes(lastTraffic.lastRoundBytes))。已暂停自动同步，点刷新可重试。"
+                : nil
+            // 提示变了就得发布，哪怕任务表一模一样——否则横幅出现/消失会被短路比较吞掉。
+            let 提示变了 = 提示 != errorMessage
+            errorMessage = 提示
             isFromCache = false
             updatedAt = Date()
-            recompute()
+            recompute(force: 提示变了)
             await persist()
         }
     }
@@ -241,6 +270,9 @@ public actor SyncEngine {
 
         switch maindata.torrents {
         case .full(let list):
+            // 带着非 0 rid 去要增量却拿回全量，说明游标被服务端丢了。数据既然下下来了就用它，
+            // 但必须停掉自动轮询——真机上这一步每 2s 重下 27.45 MB。rid=0 的冷启动全量是正常的。
+            if rid != 0 { fullPullHalted = true }
             torrents = list
             totalCount = list.count
         case .patch(let patch):
