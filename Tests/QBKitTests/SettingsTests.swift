@@ -7,7 +7,8 @@ struct SettingsTests {
         let suite = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        var s = Settings(defaults: defaults)
+        // 刻意用 let：setter 是 nonmutating，写的是 UserDefaults 那个引用，值本身没变。
+        let s = Settings(defaults: defaults)
         #expect(s.liteInterval == 30)
         s.liteInterval = 1
         #expect(s.liteInterval == 5)
@@ -21,7 +22,7 @@ struct SettingsTests {
         let suite = "test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        var s = Settings(defaults: defaults)
+        let s = Settings(defaults: defaults)
         #expect(s.sort == [SortSpec(field: .addedOn, order: .reverse)])
         s.sort = [SortSpec(field: .dlspeed, order: .reverse), SortSpec(field: .name)]
         #expect(s.sort == [SortSpec(field: .dlspeed, order: .reverse), SortSpec(field: .name)])
