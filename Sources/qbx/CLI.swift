@@ -23,6 +23,8 @@ struct QBX {
             await SyncCommand.restartTest(args)
         case "list":
             await TorrentCommands.list(args)
+        case "history":
+            await ArchiveCommands.history(args)
         case "stop", "start", "recheck", "delete", "category", "tags", "limit":
             await TorrentCommands.write(command, args)
         default:
@@ -44,6 +46,7 @@ struct QBX {
           sync                逐轮同步，打印 rid/变更条数/流量（只读）
           restart-test        验证 cookie + rid 跨进程续传能否免掉全量（只读）
           list                筛选 + 排序后的任务列表（只读，默认只拉运行中）
+          history             检索 qbhive 退休账本（只读，走 qbhive 而非 qB）
           stop / start        停止 / 启动任务
           recheck             强制校验（会触发磁盘 IO）
           delete              删除任务（需 --yes，默认不删文件）
@@ -79,6 +82,17 @@ struct QBX {
           --reverse           降序
           --limit N           最多打印 N 行（默认 20）
 
+        history 选项：
+          --query S           名称 / 保存路径模糊搜索
+          --category C        分类精确匹配
+          --tag T             命中该标签
+          --pending           只看已建档未退休的候选
+          --sort FIELD        completedOn（默认）/retiredAt/addedOn/name/size
+          --order asc|desc    默认 desc
+          --limit N           本页条数（默认 20）
+          --offset N          翻页起点（默认 0）
+          --detail            逐条展开 hash / 路径 / 磁链，空值整行不打印
+
         写操作选项：
           --hashes a,b        目标任务 hash（必填）
           --name C            category 用的分类名
@@ -95,9 +109,12 @@ struct QBX {
           --password PASS     密码（写入 Keychain）
           --api-key KEY       API key（写入 Keychain）
           --clear             清除当前服务器的密码与 API key
+          --archive-url URL   qbhive 地址（历史检索用，与 qB 地址各自独立）
+          --archive-token KEY qbhive 的 QBHIVE_TOKEN（写入 Keychain，不是登录密码）
 
         凭据也可以用环境变量临时提供，不落盘：
           QBX_URL / QBX_USERNAME / QBX_PASSWORD / QBX_API_KEY
+          QBHIVE_URL / QBHIVE_TOKEN
 
         示例：
           qbx config --url https://bt.example.com --username admin --password '…'
@@ -106,6 +123,9 @@ struct QBX {
           qbx sync --full --yes --rounds 3
           qbx restart-test --wait 10 --yes
           QBX_URL=https://bt.example.com QBX_USERNAME=admin QBX_PASSWORD='…' qbx probe
+          qbx config --archive-url http://127.0.0.1:8080 --archive-token '…'
+          qbx history --query 沙丘 --limit 10
+          qbx history --pending --detail
         """)
     }
 
@@ -124,10 +144,30 @@ struct QBX {
             return
         }
 
+        let 归档改动 = args.string("archive-url") != nil || args.string("archive-token") != nil
+        if 归档改动 {
+            let archiveStore = ArchiveCredentialStore()
+            var connection = archiveStore.load()
+            if let v = args.string("archive-url") { connection.baseURL = v }
+            if let v = args.string("archive-token") { connection.token = v }
+            do {
+                try archiveStore.save(connection)
+                print("已保存 qbhive 归档连接。令牌写入 Keychain，地址写入 UserDefaults。\n")
+                print(归档描述(connection))
+            } catch {
+                print("保存失败：\(error)")
+                exit(1)
+            }
+        }
+
         let 有改动 = args.string("url") != nil || args.string("username") != nil
             || args.string("password") != nil || args.string("api-key") != nil
         guard 有改动 else {
-            print(CredentialSource.describe(CredentialSource.resolve()))
+            if !归档改动 {
+                print(CredentialSource.describe(CredentialSource.resolve()))
+                print("")
+                print(归档描述(CredentialSource.resolveArchive()))
+            }
             return
         }
 
@@ -144,5 +184,13 @@ struct QBX {
             print("保存失败：\(error)")
             exit(1)
         }
+    }
+
+    private static func 归档描述(_ c: ArchiveConnection) -> String {
+        [
+            "qbhive 地址：\(c.normalizedBaseURL.isEmpty ? "(未配置)" : c.normalizedBaseURL)",
+            "qbhive 令牌：\(c.token.isEmpty ? "(未配置)" : "已设置（\(c.token.count) 字符）")",
+            "历史视图：\(c.enabled ? "启用" : "未启用（只影响界面，history 命令不看这个开关）")"
+        ].joined(separator: "\n")
     }
 }

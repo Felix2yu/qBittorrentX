@@ -15,6 +15,15 @@ enum CredentialSource {
         return stored
     }
 
+    /// 归档连接同样环境变量优先。`enabled` 只是界面开关，CLI 探测不看它。
+    static func resolveArchive() -> ArchiveConnection {
+        let env = ProcessInfo.processInfo.environment
+        var stored = ArchiveCredentialStore().load()
+        if let v = env["QBHIVE_URL"], !v.isEmpty { stored.baseURL = v }
+        if let v = env["QBHIVE_TOKEN"] { stored.token = v }
+        return stored
+    }
+
     static func describe(_ c: Credentials) -> String {
         let lines = [
             "地址：\(c.normalizedBaseURL.isEmpty ? "(未配置)" : c.normalizedBaseURL)",

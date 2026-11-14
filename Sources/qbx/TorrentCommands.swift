@@ -32,15 +32,15 @@ enum TorrentCommands {
             let traffic = await client.traffic()
             print("本次流量：\(ByteFormat.bytes(traffic.totalBytes))")
             print("")
-            print(pad("名称", 34) + pad("状态", 14) + pad("大小", 11) + pad("进度", 8)
-                + pad("↓速度", 12) + pad("↑速度", 12) + pad("剩余", 9) + "分类")
+            print(TextTable.pad("名称", 34) + TextTable.pad("状态", 14) + TextTable.pad("大小", 11) + TextTable.pad("进度", 8)
+                + TextTable.pad("↓速度", 12) + TextTable.pad("↑速度", 12) + TextTable.pad("剩余", 9) + "分类")
             print(String(repeating: "-", count: 110))
             for t in result.rows.prefix(上限) {
                 print(
-                    pad(截断(t.name, 32), 34) + pad(t.state.rawValue, 14)
-                    + pad(ByteFormat.bytes(t.size), 11) + pad(ByteFormat.percent(t.progress), 8)
-                    + pad(ByteFormat.speed(t.dlspeed), 12) + pad(ByteFormat.speed(t.upspeed), 12)
-                    + pad(ByteFormat.eta(t.eta), 9) + t.category
+                    TextTable.pad(TextTable.截断(t.name, 32), 34) + TextTable.pad(t.state.rawValue, 14)
+                    + TextTable.pad(ByteFormat.bytes(t.size), 11) + TextTable.pad(ByteFormat.percent(t.progress), 8)
+                    + TextTable.pad(ByteFormat.speed(t.dlspeed), 12) + TextTable.pad(ByteFormat.speed(t.upspeed), 12)
+                    + TextTable.pad(ByteFormat.eta(t.eta), 9) + t.category
                 )
             }
             if result.rows.count > 上限 { print("… 其余 \(result.rows.count - 上限) 条省略（--limit N 调整）") }
@@ -134,24 +134,6 @@ enum TorrentCommands {
             exit(1)
         }
         return QBClient(credentials: credentials)
-    }
-
-    /// 按显示宽度截断：中文占 2 列，直接 prefix 会把表格撑歪。
-    private static func 截断(_ s: String, _ 列宽: Int) -> String {
-        var 宽 = 0
-        var out = ""
-        for ch in s {
-            let w = ch.unicodeScalars.allSatisfy { $0.value < 0x1100 } ? 1 : 2
-            if 宽 + w > 列宽 { return out + "…" }
-            out.append(ch)
-            宽 += w
-        }
-        return out
-    }
-
-    private static func pad(_ s: String, _ width: Int) -> String {
-        let 显示宽 = s.reduce(0) { $0 + ($1.unicodeScalars.allSatisfy { $0.value < 0x1100 } ? 1 : 2) }
-        return 显示宽 >= width ? s + " " : s + String(repeating: " ", count: width - 显示宽)
     }
 
     private static func report(_ error: Error) {
