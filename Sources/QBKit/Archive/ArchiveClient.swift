@@ -108,7 +108,7 @@ public actor ArchiveClient {
 
         // 令牌错不重试：qbhive 没有封 IP 机制，但反复拿错令牌打也没有意义。
         if http.statusCode == 401 || http.statusCode == 403 {
-            throw QBError.credentialsRejected(AuthSniffer.snippet(data))
+            throw QBError.tokenRejected(AuthSniffer.snippet(data))
         }
         if http.statusCode >= 400 {
             throw QBError.http(status: http.statusCode, snippet: AuthSniffer.snippet(data))

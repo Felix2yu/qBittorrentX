@@ -5,6 +5,9 @@ public enum QBError: Error, Hashable, Sendable {
     case notConfigured
     /// 用户名/密码/API key 被服务端拒绝。**不重试**——qB 默认 5 次失败封 IP 1 小时。
     case credentialsRejected(String)
+    /// qbhive 的 Bearer 令牌被拒（401/403）。与 qB 的登录凭据不是一回事：
+    /// 文案必须指向 QBHIVE_TOKEN，否则用户会去改 qB 的用户名密码。
+    case tokenRejected(String)
     case http(status: Int, snippet: String)
     /// HTTP 200 但 envelope 里 success=false：服务端明确拒绝，带它给的说明。
     case rejected(String)
@@ -27,7 +30,7 @@ public enum QBError: Error, Hashable, Sendable {
 
     public var isCredentialProblem: Bool {
         switch self {
-        case .credentialsRejected, .sessionExpired: true
+        case .credentialsRejected, .sessionExpired, .tokenRejected: true
         default: false
         }
     }
@@ -37,6 +40,8 @@ public enum QBError: Error, Hashable, Sendable {
         case .invalidURL(let s): "服务器地址无效：\(s)"
         case .notConfigured: "尚未配置服务器地址"
         case .credentialsRejected(let s): s.isEmpty ? "用户名或密码错误" : "登录被拒绝：\(s)"
+        case .tokenRejected(let s):
+            s.isEmpty ? "qbhive 令牌被拒绝，核对 QBHIVE_TOKEN" : "qbhive 令牌被拒绝，核对 QBHIVE_TOKEN：\(s)"
         case .http(let status, let snippet):
             snippet.isEmpty ? "服务器返回 HTTP \(status)" : "服务器返回 HTTP \(status)：\(snippet)"
         case .rejected(let s): s.isEmpty ? "服务端拒绝了请求" : "服务端拒绝：\(s)"

@@ -141,6 +141,8 @@ struct BackoffTests {
         #expect(QBError.timedOut.isRetryable)
         #expect(QBError.transport("connection lost").isRetryable)
         #expect(QBError.credentialsRejected("").isCredentialProblem)
+        #expect(QBError.tokenRejected("").isCredentialProblem)
+        #expect(!QBError.tokenRejected("").isRetryable)
         #expect(!QBError.timedOut.isCredentialProblem)
     }
 }

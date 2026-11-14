@@ -87,13 +87,30 @@ struct ArchiveClientTests {
         #expect(req.headers["Authorization"] == nil)
     }
 
-    @Test func 四零一判凭据问题且不重放() async throws {
+    @Test func 四零一判令牌问题且不重放() async throws {
         let body = #"{"success":false,"message":"未授权"}"#
         FakeQBServer.reset(base: base) { _ in .json(body, status: 401) }
-        await #expect(throws: QBError.credentialsRejected(body)) {
+        await #expect(throws: QBError.tokenRejected(body)) {
             _ = try await client().search()
         }
         #expect(FakeQBServer.requests(base: base).count == 1)
+    }
+
+    @Test func 四零三同样判令牌问题() async throws {
+        FakeQBServer.reset(base: base) { _ in .json("禁止访问", status: 403) }
+        await #expect(throws: QBError.tokenRejected("禁止访问")) {
+            _ = try await client().search()
+        }
+        #expect(FakeQBServer.requests(base: base).count == 1)
+    }
+
+    @Test func 令牌被拒的文案指向QBHIVE_TOKEN() {
+        // qbhive 没有登录，报「用户名或密码错误」会把人引去改 qB 的凭据。
+        let 带片段 = QBError.tokenRejected(#"{"message":"unauthorized"}"#).displayMessage
+        #expect(带片段.contains("QBHIVE_TOKEN"))
+        #expect(带片段.contains("unauthorized"))
+        #expect(!带片段.contains("用户名或密码"))
+        #expect(QBError.tokenRejected("").displayMessage.contains("QBHIVE_TOKEN"))
     }
 
     @Test func 五百带片段抛http() async throws {
