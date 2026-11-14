@@ -14,6 +14,8 @@ public struct Settings {
         public static let sort = "torrent.sort"
         public static let columns = "torrent.columns"
         public static let inspectorVisible = "ui.inspectorVisible"
+        public static let archiveURL = "archive.url"
+        public static let archiveEnabled = "archive.enabled"
     }
 
     /// 数据用量档位。自动是默认值——能自动判定的就别让用户手动选。

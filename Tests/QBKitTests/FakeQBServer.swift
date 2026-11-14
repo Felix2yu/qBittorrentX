@@ -13,6 +13,9 @@ final class FakeQBServer: URLProtocol, @unchecked Sendable {
         var status: Int = 200
         var body: Data = Data()
         var headers: [String: String] = [:]
+        /// 传输层失败（超时/断连）。在 handler 里 sleep 模拟不了超时：
+        /// startLoading 与超时定时器在同一条队列上，sleep 会把定时器一起挡掉。
+        var failure: URLError?
 
         static func json(_ text: String, status: Int = 200) -> Response {
             Response(status: status, body: Data(text.utf8), headers: ["Content-Type": "application/json"])
@@ -93,6 +96,10 @@ final class FakeQBServer: URLProtocol, @unchecked Sendable {
         Self.lock.unlock()
 
         let response = respond?(request) ?? Response(status: 500, body: Data("no handler".utf8))
+        if let failure = response.failure {
+            client?.urlProtocol(self, didFailWithError: failure)
+            return
+        }
         let url = request.url ?? URL(string: "https://fake.invalid")!
         let http = HTTPURLResponse(
             url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: response.headers

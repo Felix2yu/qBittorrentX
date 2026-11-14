@@ -6,6 +6,8 @@ public enum QBError: Error, Hashable, Sendable {
     /// 用户名/密码/API key 被服务端拒绝。**不重试**——qB 默认 5 次失败封 IP 1 小时。
     case credentialsRejected(String)
     case http(status: Int, snippet: String)
+    /// HTTP 200 但 envelope 里 success=false：服务端明确拒绝，带它给的说明。
+    case rejected(String)
     /// 200 但 body 是 `"Fails."` 这类纯 JSON string，qB 用它表示会话失效。
     case sessionExpired
     case decoding(String)
@@ -37,6 +39,7 @@ public enum QBError: Error, Hashable, Sendable {
         case .credentialsRejected(let s): s.isEmpty ? "用户名或密码错误" : "登录被拒绝：\(s)"
         case .http(let status, let snippet):
             snippet.isEmpty ? "服务器返回 HTTP \(status)" : "服务器返回 HTTP \(status)：\(snippet)"
+        case .rejected(let s): s.isEmpty ? "服务端拒绝了请求" : "服务端拒绝：\(s)"
         case .sessionExpired: "会话已失效，需要重新登录"
         case .decoding(let s): "响应解析失败：\(s)"
         case .transport(let s): "网络错误：\(s)"
