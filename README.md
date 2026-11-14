@@ -2,7 +2,7 @@
 
 原生 macOS qBittorrent WebAPI 客户端。Swift 6 + SwiftUI，**最低 macOS 26 / qBittorrent 5.2**，不向下兼容（直接用 5.x 的 `stop`/`start` 与 `stoppedUP`/`stoppedDL`）。
 
-任务列表 + 多维筛选（状态/分类/标签/tracker）+ 多列排序，附带任务操作（启停/校验/删除/改分类标签/上传限速）与菜单栏速度常驻。**不含添加种子。**
+任务列表 + 多维筛选（状态/分类/标签/tracker）+ 多列排序，附带任务操作（启停/校验/删除/改分类标签/上传限速）与菜单栏速度常驻。**不含添加种子。** 另有一个**只读**的「历史」视图，检索 qbhive 的退休账本（见「qbhive 退休账本」）。
 
 ## 为什么拆成两个包
 
@@ -19,7 +19,7 @@ App/Package.swift    SwiftUI 外壳 —— 只在有 Xcode 的机器上编译
 
 ```bash
 make build        # 编译核心 + CLI
-make test         # 154 个测试（swift-testing，不是 XCTest——CLT 里没有 XCTest.framework）
+make test         # 173 个测试 / 26 个套件（swift-testing，不是 XCTest——CLT 里没有 XCTest.framework）
 make perf         # release 性能测量
 make check-model  # 单独 typecheck AppModel（它不 import SwiftUI，所以本机编得了）
 ```
@@ -35,12 +35,14 @@ qbx sync --lite                # 省流量档，无需确认
 qbx sync --full --yes --rounds 5   # 完整档；--yes 批准首次全量，逐轮打印 rid / 变更 / 字节 / 内存
 qbx restart-test --yes         # 验证 cookie + rid 跨进程续传（会拉两次全量）
 qbx list --filter downloading --sort dlspeed --reverse
+export QBHIVE_URL=http://127.0.0.1:8088 QBHIVE_TOKEN='…'   # qbhive，与 qB 凭据各自独立
+qbx history --query 沙丘 --limit 10   # 退休账本检索，打印条数 / 响应字节 / 耗时
 qbx help                       # 全部子命令与选项
 ```
 
 **完整档的首次全量要显式批准**：`qbx sync --full` 不加 `--yes` 直接拒绝执行并给出替代命令，`restart-test` 同理。CLI 没有弹框，`--yes` 就是那道确认（见下面「首次全量闸门」）。
 
-密码与 API key 只进 Keychain（account = `"\(url)#password"` / `"\(url)#apiKey"`），**绝不进 UserDefaults**。
+密码与 API key 只进 Keychain（account = `"\(url)#password"` / `"\(url)#apiKey"`），qbhive 的令牌同理（`"\(url)#qbhiveToken"`），**绝不进 UserDefaults**。
 
 ## 数据策略：三档，自动判定
 
@@ -71,6 +73,51 @@ qbx help                       # 全部子命令与选项
 - 启动先读磁盘快照立即出画面（**0 网络**）并标注「缓存 · N 分钟前」，再带旧 cookie 试 `maindata?rid=N`。**退出前强制落盘**：persist 有 30 s 节流，不强制落盘就会把过期 rid 留给下次启动。
 
 **筛选与排序全在本地做**，切筛选零网络零延迟——这对省流量档是刚需。服务端 `sort` 遇非法字段返回 400（实测），且服务端 filter 无法表达「分类 AND 标签 AND tracker AND 搜索」的组合。
+
+## qbhive 退休账本（历史，只读）
+
+那 7155 条 `missingFiles` 不是下载失败：qbhive 转码后按大小二选一删掉了原片，任务壳留在 qB 里。
+qbhive 侧的退休扫描把收敛的任务从 qB 移除（**磁盘文件一个不动**），元数据与磁链写进
+`data/archive.jsonl`。本客户端负责**检索那本账**——删掉的任务还搜得到、磁链还复制得出来。
+
+**只读**：不加种、不删账本记录、不碰任何 qB 写操作。退休判定与重复下载守卫都在 qbhive 服务端，
+客户端不参与（四档守卫、删文件的四道闸门、`dryRun` 默认 true 等护栏见 qbhive README）。
+
+```bash
+qbx config --archive-url http://127.0.0.1:8088 --archive-token '…'   # 令牌进 Keychain
+qbx history --query 沙丘 --limit 10     # 名称 / 保存路径 子串搜索，大小写不敏感
+qbx history --category 电影 --tag 4k    # 分类精确匹配 + 标签命中任一
+qbx history --pending --detail          # 只看已建档未退休的候选，逐字段展开
+qbx history --sort size --order desc --offset 100
+```
+
+- 地址与令牌**与 qB 的凭据各自独立**：令牌进 Keychain（`"\(url)#qbhiveToken"`），地址进 UserDefaults；
+  环境变量 `QBHIVE_URL` / `QBHIVE_TOKEN` 优先——沙箱验证走这条，不碰真实钥匙串
+- 过滤 / 排序 / 分页**全在 qbhive 服务端**，客户端不二次加工，行序与 qbhive 网页一致。
+  单页默认 20 条（`--limit`），条数 / 响应字节 / 耗时按 `probe` 同口径打印，好和 qB 那 27.45 MB 直接对比
+- `--detail` 才展开 hash 与磁链：真机验证守卫要拿磁链重加，走「我确实想重下」的逃生口要拿 hash
+  去 qbhive 删账本记录。空值整行不打印
+- 未配置地址直接退出码 1 并给出配置命令，**一个请求都不发**；401/403 报「qbhive 令牌被拒绝，核对
+  `QBHIVE_TOKEN`」并附服务端正文摘要，**不重放**。qbhive 没有登录，所以这句与 qB 的「用户名或密码错误」
+  是两个不同的错误类型（`QBError.tokenRejected` / `.credentialsRejected`）
+- 设置里的「启用历史视图」**只影响侧栏那一节**，`history` 命令不看这个开关
+
+**沙箱实测（本机 qbhive + 119 条合成账本，非真机）**：
+
+| 场景 | 结果 |
+|---|---|
+| 默认一页 20 条 | **13.08 KB / 0.03 s** |
+| `--query 沙丘` | 14 条命中，取 5 条 **3.30 KB** |
+| `--pending` | 29 条候选，一页 13.26 KB |
+| `--sort size --order desc` | 首条 180.00 GB |
+| `--offset 100` | 本页 19 条 **12.51 KB**（119 − 100），无「其余未取」提示 |
+| `--detail --limit 1`（服务端开鉴权 + 正确令牌） | **661 B**，展开 hash 与磁链 |
+| 空结果 | **48 B** |
+| 令牌错误 / 缺失 | 退出码 **1**，401 不重放 |
+
+一页 13.08 KB 对 qB 全量 27.45 MB，约 **1/2150**：退休 + 服务端分页之后，「搜一个老任务」
+不必再吃下整包。沙箱账本 119 行 79,732 B，**平均 670 B/条**（合成数据，真机平均值还没量过）；
+按这个量级 7000 条约 4.6 MB 本地文件，检索时只下发当前页。
 
 ## 真机端到端实测（qB 5.3.0 / WebAPI 2.16.2，7283 条任务）
 
@@ -125,10 +172,14 @@ qbx help                       # 全部子命令与选项
 8. **`TableColumnBuilder` 的 `buildBlock` 只到 10 个参数，且没有 `buildPartialBlock`**（已核对 SDK swiftinterface）→ 14 列必须拆成两个 `Group`，否则直接编不过。`ViewBuilder` 有变参 `buildBlock`，不受此限。
 9. **`Settings` 的 setter 必须 `nonmutating`**：它只是 UserDefaults 的门面，否则 `let settings = Settings()` 连配置都改不了。
 10. **`QueryPipeline` 与 Table comparator 的 `savePath` 排序口径必须一致**：一处用裸 `<`、一处用 `.localizedStandard`，`Season10` 与 `Season2` 的先后就相反。已统一为 `localizedStandard` 并加断言全 18 字段行序一致的测试。
+11. **`Table` 没有 `id:` 初始化器**（已核对 SDK swiftinterface：`TableForEachContent` 要求 `Element: Identifiable`）→ 账本记录 `ArchiveRecord` 必须自己满足 `Identifiable`，`id` 取 `hash`，与 `Torrent`/`Category` 同一套写法。
+12. **归档视图的 `.task(id:)` 必须把连接也算进 id**：只挂 `archiveQuery` 的话，在设置里存完新地址/令牌后 id 不变，历史页会一直停在上一次的「未配置」或 401 上。
 
 ## 每个提交都能 build + test
 
 每个提交都在临时 worktree 里单独 checkout 后跑 `swift build --build-tests` + `swift test`，**fail=0**。分两轮：前 16 个一轮（测试数 33 → 65 → 113 → 115 → 133 → 135 → 143 → 146），真机联调后新增的 6 个一轮（**147 → 149 → 149 → 154 → 154 → 154，24 个套件**）；其后的文档提交同样逐个跑过。
+
+归档这一批 5 个提交又是一轮（**171 → 171 → 171 → 171 → 173，26 个套件**）：QBKit 客户端一次带来 17 个新测试（`ArchiveClientTests` 15 个 + `ArchiveCredentialStoreTests` 2 个），中间三个提交只加断言、CLI 与界面代码，测试数不变；最后修令牌被拒的文案补 2 个。`CoreBoundaryTests` 全程绿——归档客户端是 `actor` + `Sendable` struct，没往 QBKit 里带 SwiftUI。
 
 第一版历史有四处真缺陷，全是同一类——**文件按目录分模块，但依赖不按目录走**：
 
@@ -173,6 +224,18 @@ open .build/release/qBittorrentX.app
 - [ ] 删除弹框「同时删除硬盘上的文件」**默认不勾**
 - [ ] 改标签是覆盖式：不在列表里的现有标签被移除
 
+历史视图与归档设置（同样一次都没目视过）：
+
+- [ ] 设置 → QBHive 归档：启用开关 + 地址 + **令牌明文输入框**（写明是 `QBHIVE_TOKEN`、不是登录密码），保存后提示已存钥匙串；重启后地址与开关还在、令牌不回显到 UserDefaults
+- [ ] **未启用时侧栏「历史」整节不渲染**；启用后出现，条数未知时不显示一个 0
+- [ ] 历史页工具栏**一行摆完**（只看候选开关 + 排序下拉 + 上/下一页），1280×760 与 ~900 px 宽各截一张
+- [ ] 空分类 / 空原因 / 空保存路径整格不渲染；未配置地址、检索失败、无匹配记录三种占位各自正确
+- [ ] 搜索防抖 300 ms：连续输入只发一次请求（抓包核对）；改筛选或排序回到第一页，首/尾页翻页按钮禁用
+- [ ] 右键只有「复制磁链」「复制保存路径」，多选按行拼接，全空时禁用；**没有任何写操作入口**
+- [ ] 状态栏在历史页报 qbhive 的条数与字节（含最近一次检索耗时），**不与 qB 流量混成一个数**
+- [ ] 在设置里改地址/令牌并保存后，历史页自动重搜，不停在旧的 401 上
+- [ ] 点侧栏任一筛选行即切回任务表，历史页的选中态不带过去
+
 若 SwiftUI 编译失败（宏插件等），退路：`@Observable` → `ObservableObject + @Published`。核心包不受影响，它本来就没用宏。
 
 ## 明确未验证
@@ -182,7 +245,8 @@ open .build/release/qBittorrentX.app
 3. **API key 的正确 header**：实测那台服务器对客户端出口 IP 免鉴权，带 `X-Webapi-Key`、带 `Authorization: Bearer`、完全不带鉴权头三者都返回完整数据，判定不了。故**双发两个头**兜底，换成开了鉴权的服务器后删掉无效的那个。401/403/重登嗅探分支只能靠 URLProtocol 桩覆盖。
 4. **ATS 对裸 IP http 的行为**：`NSAllowsLocalNetworking` 是否放行裸 IP 未验证，故留了 `NSAllowsArbitraryLoads` 兜底。
 5. **档位热切换没有被真实路径变化触发过**：只有桩级代次号测试覆盖。而 `NWPathMonitor` 的判定本身已被实测证伪（见「真机端到端实测」负结果 2），所以热切换准不准已经不重要——首次全量闸门才是那道保险。
-6. **本机假服务器的端到端数字**（合成 payload 3.05 MB，真机 maindata 27.45 MB，故绝对值偏小，比例关系可参考）：
+6. **qbhive 归档链路只在沙箱验过**：本机 qbhive + 119 条合成账本，真机一次都没跑。qbhive 侧的退休与重复下载守卫也还没按四级递进在真机上验过（只读统计 → `dryRun` → `batchSize=5` → 放开批量；守卫 `notify` → `remove` → `remove-files`），**删文件那档尤其没在真实存储上试过**。`ArchiveClient` 的解码 / 查询参数 / 401 / 空结果 / 超时由 URLProtocol 桩覆盖（按 host 分桶），桩证明的是客户端管路正确，不是 qbhive 的真实行为。
+7. **本机假服务器的端到端数字**（合成 payload 3.05 MB，真机 maindata 27.45 MB，故绝对值偏小，比例关系可参考）：
 
    | 场景 | 实测 |
    |---|---|
