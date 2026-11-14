@@ -26,6 +26,29 @@ public final class AppModel {
     /// 所有弹框走这一个入口：同一个视图上挂两个 .sheet 会互相吞掉。
     public var activeSheet: ActionSheet?
 
+    /// 详情区看哪张表。侧栏的历史节未启用时不渲染，也就切不过来。
+    public enum Section: Hashable, Sendable { case torrents, archive }
+    public var section: Section = .torrents
+
+    // MARK: - 归档（qbhive 退休账本，只读）
+
+    public var archiveEnabled = false
+    public var archiveURL = ""
+    public var archiveToken = ""
+    public var archiveQuery = ArchiveQuery()
+    public var archiveSelection: Set<String> = []
+    public var archiveResult = ArchiveResult()
+    public var archiveError: String?
+    public var archiveLoading = false
+
+    /// 一次检索的成品：条数/字节/耗时一起到位，主线程只换这一个值。
+    public struct ArchiveResult: Hashable, Sendable {
+        public var records: [ArchiveRecord] = []
+        public var total = 0
+        public var bytes: Int64 = 0
+        public var elapsed: Double = 0
+    }
+
     public enum ActionSheet: Identifiable, Hashable {
         case category([String])
         case tags([String])
@@ -52,8 +75,10 @@ public final class AppModel {
 
     @ObservationIgnored private let settings = Settings()
     @ObservationIgnored private let credentialStore = CredentialStore()
+    @ObservationIgnored private let archiveStore = ArchiveCredentialStore()
     @ObservationIgnored private let watcher = NetworkPathWatcher()
     @ObservationIgnored private let client: QBClient
+    @ObservationIgnored private let archiveClient: ArchiveClient
     @ObservationIgnored private let engine: SyncEngine
     @ObservationIgnored private var consumeTask: Task<Void, Never>?
     @ObservationIgnored private var canUseIncrementalSync = false
@@ -72,6 +97,11 @@ public final class AppModel {
             requiresFullPullApproval: !credentials.normalizedBaseURL.isEmpty
         )
         canUseIncrementalSync = credentials.canUseIncrementalSync
+        let archive = ArchiveCredentialStore().load()
+        archiveClient = ArchiveClient(baseURL: archive.baseURL, token: archive.token)
+        archiveEnabled = archive.enabled
+        archiveURL = archive.normalizedBaseURL
+        archiveToken = archive.token
         inspectorVisible = settings.inspectorVisible
         dataUsage = settings.dataUsage
         liteInterval = settings.liteInterval
@@ -194,7 +224,9 @@ public final class AppModel {
 
     // MARK: - 筛选与排序
 
+    /// 侧栏每个筛选行都走这里，所以点任一筛选即从历史切回任务表。
     public func applyQuery() {
+        section = .torrents
         Task { await engine.setQuery(query) }
     }
 
@@ -246,6 +278,69 @@ public final class AppModel {
             await engine.setMode(resolvedMode())
             await engine.refresh()
         }
+    }
+
+    // MARK: - 归档
+
+    public func loadArchiveConnection() -> ArchiveConnection { archiveStore.load() }
+
+    public func saveArchiveConnection(_ connection: ArchiveConnection) {
+        do {
+            try archiveStore.save(connection)
+        } catch {
+            actionError = "保存到钥匙串失败：\(error.localizedDescription)"
+            return
+        }
+        archiveEnabled = connection.enabled
+        archiveURL = connection.normalizedBaseURL
+        archiveToken = connection.token
+        actionError = nil
+        let client = archiveClient
+        Task { await client.configure(baseURL: connection.baseURL, token: connection.token) }
+        if !connection.enabled {
+            section = .torrents
+            archiveResult = ArchiveResult()
+            archiveError = nil
+        }
+    }
+
+    public func showArchive() {
+        section = .archive
+    }
+
+    /// 防抖在视图的 `.task(id:)` 里：条件一变就取消上一次睡眠，这里只管发一次请求。
+    /// 检索是服务端过滤分页，本地不再二次筛选，行序与 qbhive 网页一致。
+    public func searchArchive() async {
+        guard archiveEnabled, !archiveURL.isEmpty else { return }
+        archiveLoading = true
+        archiveError = nil
+        do {
+            let page = try await archiveClient.search(archiveQuery)
+            let traffic = await archiveClient.traffic()
+            let elapsed = await archiveClient.metrics().last?.duration ?? 0
+            archiveResult = ArchiveResult(
+                records: page.records, total: page.total,
+                bytes: traffic.totalBytes, elapsed: elapsed
+            )
+            archiveSelection = []
+        } catch {
+            archiveError = (error as? QBError)?.displayMessage ?? error.localizedDescription
+            archiveResult = ArchiveResult()
+        }
+        archiveLoading = false
+    }
+
+    /// 翻页只改 offset，由视图的 `.task(id:)` 触发下一次检索。
+    public func turnArchivePage(_ delta: Int) {
+        let next = max(0, archiveQuery.offset + delta * archiveQuery.limit)
+        guard next != archiveQuery.offset else { return }
+        archiveQuery.offset = next
+    }
+
+    public var canTurnArchivePageBack: Bool { archiveQuery.offset > 0 && !archiveLoading }
+
+    public var canTurnArchivePageForward: Bool {
+        !archiveLoading && archiveQuery.offset + archiveResult.records.count < archiveResult.total
     }
 
     // MARK: - 写操作

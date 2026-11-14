@@ -72,6 +72,16 @@ struct SidebarView: View {
                     }
                 }
             }
+            // 未启用归档时整节不渲染，不摆一个点不动的空入口。
+            // 条数要等第一次检索才知道，未知就不显示，不摆一个 0。
+            if model.archiveEnabled {
+                Section("历史") {
+                    row("退休账本", count: model.archiveResult.total > 0 ? model.archiveResult.total : nil,
+                        systemImage: "clock.arrow.circlepath", selected: model.section == .archive) {
+                        model.showArchive()
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
@@ -94,14 +104,16 @@ struct SidebarView: View {
     }
 
     private func row(
-        _ title: String, count: Int, systemImage: String, selected: Bool, action: @escaping () -> Void
+        _ title: String, count: Int? = nil, systemImage: String, selected: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: systemImage).frame(width: 16)
                 Text(title).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
-                Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+                if let count {
+                    Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
+                }
             }
             .contentShape(Rectangle())
         }

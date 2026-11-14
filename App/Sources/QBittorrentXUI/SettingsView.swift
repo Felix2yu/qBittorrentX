@@ -11,6 +11,11 @@ public struct SettingsView: View {
     @State private var apiKey = ""
     @State private var saved = false
 
+    @State private var archiveEnabled = false
+    @State private var archiveURL = ""
+    @State private var archiveToken = ""
+    @State private var archiveSaved = false
+
     public init(model: AppModel) {
         self.model = model
     }
@@ -30,6 +35,21 @@ public struct SettingsView: View {
                     }
                 }
                 Text("密码与 API Key 只存钥匙串，不进偏好设置文件。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("QBHive 归档") {
+                Toggle("启用历史视图", isOn: $archiveEnabled)
+                TextField("地址", text: $archiveURL, prompt: Text("http://127.0.0.1:8080"))
+                // 令牌用明文：它是 qbhive 的 QBHIVE_TOKEN，不是登录密码，遮住看不出填错了哪一段。
+                TextField("令牌（QBHIVE_TOKEN）", text: $archiveToken)
+                HStack {
+                    Button("保存") { saveArchive() }
+                    if archiveSaved {
+                        Text("已保存到钥匙串").foregroundStyle(.secondary)
+                    }
+                }
+                Text("启用后侧栏出现「历史」节，可搜索已从 qB 退休的任务并复制磁链。令牌只存钥匙串。")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -84,6 +104,10 @@ public struct SettingsView: View {
         username = c.username
         password = c.password
         apiKey = c.apiKey
+        let a = model.loadArchiveConnection()
+        archiveEnabled = a.enabled
+        archiveURL = a.baseURL
+        archiveToken = a.token
     }
 
     private func save() {
@@ -91,5 +115,12 @@ public struct SettingsView: View {
             Credentials(baseURL: url, username: username, password: password, apiKey: apiKey)
         )
         saved = model.actionError == nil
+    }
+
+    private func saveArchive() {
+        model.saveArchiveConnection(
+            ArchiveConnection(baseURL: archiveURL, token: archiveToken, enabled: archiveEnabled)
+        )
+        archiveSaved = model.actionError == nil
     }
 }

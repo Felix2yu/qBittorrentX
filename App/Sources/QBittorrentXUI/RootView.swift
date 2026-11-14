@@ -13,13 +13,17 @@ public struct RootView: View {
         NavigationSplitView {
             SidebarView(model: model)
         } detail: {
-            TorrentTableView(model: model, columns: $columns)
-                .searchable(text: $model.query.search, placement: .toolbar, prompt: "搜索名称")
-                .toolbar { toolbarContent }
-                .inspector(isPresented: $model.inspectorVisible) {
-                    TorrentInspector(torrents: model.selectedTorrents)
-                        .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
-                }
+            if model.section == .archive {
+                ArchiveView(model: model)
+            } else {
+                TorrentTableView(model: model, columns: $columns)
+                    .searchable(text: $model.query.search, placement: .toolbar, prompt: "搜索名称")
+                    .toolbar { toolbarContent }
+                    .inspector(isPresented: $model.inspectorVisible) {
+                        TorrentInspector(torrents: model.selectedTorrents)
+                            .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+                    }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { StatusBar(model: model) }
         .onChange(of: model.query) { model.applyQuery() }
@@ -130,9 +134,9 @@ struct StatusBar: View {
                 Text("↑ \(ByteFormat.speed(state.upInfoSpeed))").monospacedDigit()
                 separator
                 Text(countText).monospacedDigit()
-                if !model.selection.isEmpty {
+                if selectedCount > 0 {
                     separator
-                    Text("已选 \(model.selection.count)").monospacedDigit()
+                    Text("已选 \(selectedCount)").monospacedDigit()
                 }
                 separator
                 Text(modeText)
@@ -141,10 +145,10 @@ struct StatusBar: View {
                     Text(cacheText).foregroundStyle(.orange)
                 }
                 Spacer(minLength: 8)
-                Text("本次 \(ByteFormat.bytes(model.snapshot.traffic.totalBytes))")
+                Text("本次 \(ByteFormat.bytes(trafficBytes))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .help("本次启动以来向服务器请求的字节数")
+                    .help(trafficHelp)
             }
             .font(.callout)
             .padding(.horizontal, 10)
@@ -159,10 +163,30 @@ struct StatusBar: View {
 
     private var countText: String {
         let s = model.snapshot
+        if model.section == .archive {
+            return "历史 \(model.archiveResult.total) 条 · 本页 \(model.archiveResult.records.count)"
+        }
         if s.mode == .lite {
             return "运行中 \(s.runningHashes.count) · 缓存 \(s.loadedCount)"
         }
         return "\(s.rows.count)/\(s.loadedCount) 个任务"
+    }
+
+    private var selectedCount: Int {
+        model.section == .archive ? model.archiveSelection.count : model.selection.count
+    }
+
+    /// 看历史时报的是 qbhive 的字节，别和 qB 的流量混成一个数。
+    private var trafficBytes: Int64 {
+        model.section == .archive ? model.archiveResult.bytes : model.snapshot.traffic.totalBytes
+    }
+
+    private var trafficHelp: String {
+        if model.section == .archive {
+            let elapsed = String(format: "%.2fs", model.archiveResult.elapsed)
+            return "本次启动以来向 qbhive 请求的字节数；最近一次检索耗时 \(elapsed)"
+        }
+        return "本次启动以来向服务器请求的字节数"
     }
 
     private var modeText: String {
