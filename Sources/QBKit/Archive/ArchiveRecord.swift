@@ -2,7 +2,9 @@ import Foundation
 
 /// qbhive 退休账本的一条记录，JSON 键与 qbhive `archive.Record` 一一对应。
 /// 账本是 append-only 演进的老文件，早期记录可能缺键，所以全字段 decodeIfPresent。
-public struct ArchiveRecord: Hashable, Sendable, Codable {
+public struct ArchiveRecord: Identifiable, Hashable, Sendable, Codable {
+    public var id: String { hash }
+
     public var hash: String
     public var name: String
     public var category: String

@@ -28,6 +28,7 @@ struct ArchiveClientTests {
         #expect(page.total == 1)
         let r = try #require(page.records.first)
         #expect(r.hash == "abc")
+        #expect(r.id == r.hash)
         #expect(r.name == "沙丘2")
         #expect(r.tags == "转码,4k")
         #expect(r.contentPath == "/Volumes/Media/电影/沙丘2.mkv")
