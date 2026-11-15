@@ -87,10 +87,15 @@ public final class AppModel {
     @ObservationIgnored private var isExpensive = false
     @ObservationIgnored private var isConstrained = false
     @ObservationIgnored private var didBootstrap = false
+    /// 凭据只在启动时读一次钥匙串、保存时写一次。每次打开设置页都重新读会造成多次
+    /// 钥匙串访问（每个 item 各有 ACL），签名身份变化时尤其会连着弹好几个授权框。
+    /// 外部进程（qbx CLI）改了钥匙串后，重启 App 即可读到新值。
+    @ObservationIgnored private var cachedCredentials = Credentials()
 
     public init() {
         let store = CredentialStore()
         let credentials = store.load()
+        cachedCredentials = credentials
         client = QBClient(credentials: credentials)
         // 没配服务器时没什么可下载的，别拿确认框挡住「地址无效」的提示。
         // 之后在设置里填了地址，applyCredentials 会把批准作废，闸门重新生效。
@@ -276,7 +281,7 @@ public final class AppModel {
     // MARK: - 凭据
 
     public func loadCredentials() -> Credentials {
-        credentialStore.load()
+        cachedCredentials
     }
 
     public func saveCredentials(_ credentials: Credentials) {
@@ -286,6 +291,7 @@ public final class AppModel {
             actionError = "保存到钥匙串失败：\(error.localizedDescription)"
             return
         }
+        cachedCredentials = credentials
         canUseIncrementalSync = credentials.canUseIncrementalSync
         actionError = nil
         Task {
