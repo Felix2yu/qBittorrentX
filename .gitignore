@@ -2,3 +2,6 @@
 .swiftpm/
 *.app
 .DS_Store
+# ---- AI Agent 生成目录（不进版本库，本地保留）----
+.workbuddy/
+.zcode/
