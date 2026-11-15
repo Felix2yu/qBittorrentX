@@ -100,6 +100,10 @@ release，合成 7283 条 / 6.46 MB payload：
 8. **`TableColumnBuilder` 的 `buildBlock` 只到 10 个参数，且没有 `buildPartialBlock`**（已核对 SDK swiftinterface）→ 14 列必须拆成两个 `Group`，否则直接编不过。`ViewBuilder` 有变参 `buildBlock`，不受此限。
 9. **`Settings` 的 setter 必须 `nonmutating`**：它只是 UserDefaults 的门面，否则 `let settings = Settings()` 连配置都改不了。
 10. **`QueryPipeline` 与 Table comparator 的 `savePath` 排序口径必须一致**：一处用裸 `<`、一处用 `.localizedStandard`，`Season10` 与 `Season2` 的先后就相反。已统一为 `localizedStandard` 并加断言全 18 字段行序一致的测试。
+11. **SwiftUI `Table` 的私有 `currentWidth` 会覆盖 `.width(min:ideal:max:)` 的 ideal**（macOS 27.2 真机实测）：`TableColumnCustomization` 编进 `torrent.columns` 的 `perColumnState[].currentWidth` 优先级更高——旧偏好里 name=393，启动时列宽就是 393，spec 的 230 完全不生效。所以只调 `.width()` 参数修不好「重启回退」：启动时必须把私有宽度状态剥掉（保留显隐与列顺序），再用自己的 `torrent.columnWidths` 驱动 ideal。
+    同轮另外两条实测：`NSTableColumn.identifier` 是**每次启动都变的随机 UUID**，列映射只能靠表头标题，不能靠 id 或下标（验收环境里首列是「大小」而非「名称」）；`NSTableView` 自身也响应双击分隔线，自定义 fit 必须抑制随后 0.4 s 的自动保存，否则原生结果会把按内容测量并钳制过的值覆盖成上限。
+12. **钥匙串「始终允许」反复失效，根因是 ad-hoc 签名的 designated requirement 只有 cdhash**（macOS 27.2 实测）：`security dump-keychain -a` 里是 `entry 1 … requirement: cdhash H"1e8e…" (status -2147415734)`，当前 App 的 cdhash 却已是 `ae946…`。`build-app.sh` 原先每次 `codesign --force --sign -` 重打包，二进制一变 cdhash 就变，ACL 里的旧授权立刻作废 → 每次启动重新弹窗；`CredentialStore.load()` 每个地址读 password / apiKey 两个 item，启动时 2 次、打开设置页又 2 次，所以一不留神连着弹好几个框。
+    对照实验（同一 bundle，主可执行只改 1 字节）：ad-hoc 的 DR 从 `cdhash H"ae946…"` 变成 `ac16b…`；改成本机 `Apple Development` 证书签名后，DR 恒为 `identifier "im.yufei.qbittorrentx" and anchor apple generic and certificate leaf…`，两次完全相同。**修法**：打包默认用 `security find-identity -v -p codesigning` 选证书（无证书才退回 ad-hoc 并警告）；`AppModel` 缓存凭据，钥匙串只在启动读一次、保存写一次。旧 item 上仍需点最后一次「始终允许」把新 DR 写进 ACL，之后无论怎么重新打包都不再弹。
 
 ## 每个提交都能 build + test
 
