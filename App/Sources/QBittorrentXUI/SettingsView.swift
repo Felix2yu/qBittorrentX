@@ -85,8 +85,11 @@ public struct SettingsView: View {
             }
 
             Section("界面") {
-                Button("重置列显隐与顺序") { columns = TableColumnCustomization<Torrent>() }
-                Text("列宽由系统决定，SwiftUI 没有列宽持久化接口，拖动的宽度重启后不保留。")
+                Button("重置列设置") {
+                    columns = TableColumnCustomization<Torrent>()
+                    model.resetColumnWidths()
+                }
+                Text("列宽、列顺序与显隐都会保存，重启后恢复；双击列标题右边界可按内容自适应宽度。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

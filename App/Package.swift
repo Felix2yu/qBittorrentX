@@ -23,6 +23,11 @@ let package = Package(
             name: "qBittorrentX",
             dependencies: ["QBittorrentXUI"],
             path: "Sources/qBittorrentX"
+        ),
+        .testTarget(
+            name: "QBittorrentXUITests",
+            dependencies: ["QBittorrentXUI"],
+            path: "Tests/QBittorrentXUITests"
         )
     ]
 )

@@ -7,6 +7,12 @@ struct QBittorrentXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
 
+    init() {
+        // 必须早于 RootView / SettingsView 的 @AppStorage(torrent.columns) 读取：
+        // 系统私有的 currentWidth 会覆盖 .width() 的 ideal，不剥掉的话旧宽度永远回退不去。
+        ColumnWidthMigration.stripSavedWidths()
+    }
+
     var body: some Scene {
         Window("qBittorrentX", id: "main") {
             RootView(model: model)

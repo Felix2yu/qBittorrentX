@@ -31,20 +31,20 @@ struct TorrentTableView: View {
                         .foregroundStyle(isStale(torrent) ? .secondary : .primary)
                         .help(isStale(torrent) ? "缓存数据，非实时" : torrent.name)
                 }
-                .width(min: 200, ideal: 380)
+                .qbWidth(.name, widths: model.columnWidths)
                 .customizationID("name")
 
                 TableColumn("大小", sortUsing: cmp(.size)) { torrent in
                     Text(ByteFormat.bytes(torrent.size)).monospacedDigit()
                 }
-                .width(min: 70, ideal: 90)
+                .qbWidth(.size, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("size")
 
                 TableColumn("进度", sortUsing: cmp(.progress)) { torrent in
                     ProgressCell(torrent: torrent)
                 }
-                .width(min: 80, ideal: 110)
+                .qbWidth(.progress, widths: model.columnWidths)
                 .customizationID("progress")
 
                 TableColumn("下载速度", sortUsing: cmp(.dlspeed)) { torrent in
@@ -52,7 +52,7 @@ struct TorrentTableView: View {
                         Text(ByteFormat.speed(torrent.dlspeed)).monospacedDigit()
                     }
                 }
-                .width(min: 80, ideal: 100)
+                .qbWidth(.dlspeed, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("dlspeed")
 
@@ -61,14 +61,14 @@ struct TorrentTableView: View {
                         Text(ByteFormat.speed(torrent.upspeed)).monospacedDigit()
                     }
                 }
-                .width(min: 80, ideal: 100)
+                .qbWidth(.upspeed, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("upspeed")
 
                 TableColumn("剩余时间", sortUsing: cmp(.eta)) { torrent in
                     Text(ByteFormat.eta(torrent.eta)).monospacedDigit()
                 }
-                .width(min: 70, ideal: 90)
+                .qbWidth(.eta, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("eta")
 
@@ -76,7 +76,7 @@ struct TorrentTableView: View {
                     Text(torrent.state.displayName)
                         .foregroundStyle(StateStyle.color(torrent.state))
                 }
-                .width(min: 76, ideal: 90)
+                .qbWidth(.state, widths: model.columnWidths)
                 .customizationID("state")
             }
 
@@ -84,52 +84,62 @@ struct TorrentTableView: View {
                 TableColumn("分类", sortUsing: cmp(.category)) { torrent in
                     Text(torrent.category)
                 }
-                .width(min: 70, ideal: 90)
+                .qbWidth(.category, widths: model.columnWidths)
                 .customizationID("category")
 
                 TableColumn("标签", sortUsing: cmp(.tags)) { torrent in
                     Text(torrent.tags.joined(separator: ", "))
                 }
-                .width(min: 80, ideal: 120)
+                .qbWidth(.tags, widths: model.columnWidths)
                 .customizationID("tags")
 
                 TableColumn("分享率", sortUsing: cmp(.ratio)) { torrent in
                     Text(ByteFormat.ratio(torrent.ratio)).monospacedDigit()
                 }
-                .width(min: 60, ideal: 80)
+                .qbWidth(.ratio, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("ratio")
 
                 TableColumn("种子/用户", sortUsing: cmp(.numSeeds)) { torrent in
                     Text("\(torrent.numSeeds)/\(torrent.numLeechs)").monospacedDigit()
                 }
-                .width(min: 66, ideal: 80)
+                .qbWidth(.peers, widths: model.columnWidths)
                 .alignment(.numeric)
                 .customizationID("peers")
 
                 TableColumn("添加时间", sortUsing: cmp(.addedOn)) { torrent in
                     Text(ByteFormat.timestamp(torrent.addedOn)).monospacedDigit()
                 }
-                .width(min: 110, ideal: 140)
+                .qbWidth(.addedOn, widths: model.columnWidths)
                 .customizationID("addedOn")
 
                 TableColumn("完成时间", sortUsing: cmp(.completionOn)) { torrent in
                     Text(ByteFormat.timestamp(torrent.completionOn)).monospacedDigit()
                 }
-                .width(min: 110, ideal: 140)
+                .qbWidth(.completionOn, widths: model.columnWidths)
                 .customizationID("completionOn")
                 .defaultVisibility(.hidden)
 
                 TableColumn("保存路径", sortUsing: cmp(.savePath)) { torrent in
                     Text(torrent.savePath).help(torrent.savePath)
                 }
-                .width(min: 120, ideal: 200)
+                .qbWidth(.savePath, widths: model.columnWidths)
                 .customizationID("savePath")
                 .defaultVisibility(.hidden)
             }
         }
         .contextMenu(forSelectionType: String.self) { hashes in
             RowActions(model: model, hashes: Array(hashes))
+        }
+        // 零尺寸透明桥接：只接管底层 NSTableView 的列宽，不碰 delegate / 数据源 / 选择，
+        // 因此排序、右键菜单、列显隐与拖动顺序这些既有交互完全不受影响。
+        .background(alignment: .topLeading) {
+            ColumnWidthBridge(
+                widths: $model.columnWidths,
+                rows: model.snapshot.rows,
+                onCommit: { model.applyColumnWidths($0) }
+            )
+            .frame(width: 1, height: 1)
         }
     }
 }

@@ -15,6 +15,8 @@ public final class AppModel {
     /// Table 直接绑这个数组；点列头由 SwiftUI 改写，再经 onChange 落回 SortSpec 持久化。
     public var sortOrder: [KeyPathComparator<Torrent>] = []
     public var inspectorVisible = true
+    /// 列宽，键是 TableColumn 的 customizationID。启动时读回偏好，拖拽/双击后由桥接层提交。
+    public var columnWidths: [String: Double] = [:]
     public var dataUsage: Settings.DataUsage = .auto
     public var liteInterval = Settings.defaultLiteInterval
     /// 正在执行写操作的 hash，用来禁用按钮防重复点击。
@@ -103,6 +105,7 @@ public final class AppModel {
         archiveURL = archive.normalizedBaseURL
         archiveToken = archive.token
         inspectorVisible = settings.inspectorVisible
+        columnWidths = settings.columnWidths
         dataUsage = settings.dataUsage
         liteInterval = settings.liteInterval
         sortOrder = SortSpec.comparators(settings.sort)
@@ -238,6 +241,18 @@ public final class AppModel {
 
     public func applyInspectorVisible() {
         settings.inspectorVisible = inspectorVisible
+    }
+
+    /// 列宽唯一落盘入口：桥接层提交后同时更新内存状态与偏好。
+    /// 重启时 qbWidth 直接把这个值用作 ideal，不会先被固定 ideal 分配覆盖。
+    public func applyColumnWidths(_ widths: [String: Double]) {
+        settings.columnWidths = widths
+        columnWidths = widths
+    }
+
+    /// 设置页「重置列设置」用：清空后各列回到 spec.idealWidth。
+    public func resetColumnWidths() {
+        applyColumnWidths([:])
     }
 
     public func clearFilters() {

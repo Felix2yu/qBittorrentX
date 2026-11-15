@@ -13,6 +13,9 @@ public struct Settings {
         public static let fullInterval = "sync.fullInterval"
         public static let sort = "torrent.sort"
         public static let columns = "torrent.columns"
+        /// 列宽另立一个键：TableColumnCustomization 内部虽带 currentWidth，但没有公开读写接口，
+        /// 启动时又会被 .width(min:ideal:) 重新分配。这里存的是「我们自己能读回并应用」的值。
+        public static let columnWidths = "torrent.columnWidths"
         public static let inspectorVisible = "ui.inspectorVisible"
         public static let archiveURL = "archive.url"
         public static let archiveEnabled = "archive.enabled"
@@ -83,5 +86,26 @@ public struct Settings {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.sort)
         }
+    }
+
+    /// 列宽，键是 TableColumn 的 customizationID，值单位为 pt。
+    /// QBKit 只做基础值域校验（有限、正数、上限 4096）；各列的 min/max 属于布局知识，
+    /// 由 UI 层的 TorrentColumn 在写入前钳制。清空用 `= [:]`。
+    public var columnWidths: [String: Double] {
+        get {
+            guard let data = defaults.data(forKey: Key.columnWidths),
+                  let stored = try? JSONDecoder().decode([String: Double].self, from: data)
+            else { return [:] }
+            return stored.filter { Self.isValidColumnWidth(key: $0.key, value: $0.value) }
+        }
+        nonmutating set {
+            let clean = newValue.filter { Self.isValidColumnWidth(key: $0.key, value: $0.value) }
+            guard let data = try? JSONEncoder().encode(clean) else { return }
+            defaults.set(data, forKey: Key.columnWidths)
+        }
+    }
+
+    private static func isValidColumnWidth(key: String, value: Double) -> Bool {
+        !key.isEmpty && value.isFinite && value > 0 && value <= 4096
     }
 }
