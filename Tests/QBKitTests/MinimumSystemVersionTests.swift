@@ -14,10 +14,10 @@ struct MinimumSystemVersionTests {
         try String(contentsOf: Self.root.appendingPathComponent(relative), encoding: .utf8)
     }
 
-    @Test func 两个包都声明macOS26() throws {
+    @Test func 两个包都声明macOS27() throws {
         for path in ["Package.swift", "App/Package.swift"] {
             let text = try read(path)
-            #expect(text.contains(".macOS(.v26)"), "\(path) 未声明 .macOS(.v26)")
+            #expect(text.contains(".macOS(.v27)"), "\(path) 未声明 .macOS(.v27)")
         }
     }
 
@@ -27,7 +27,7 @@ struct MinimumSystemVersionTests {
         let plist = try #require(
             try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         )
-        #expect(plist["LSMinimumSystemVersion"] as? String == "26.0")
+        #expect(plist["LSMinimumSystemVersion"] as? String == "27.0")
         #expect(plist["CFBundleIdentifier"] as? String == "im.yufei.qbittorrentx")
         #expect(plist["CFBundleExecutable"] as? String == "qBittorrentX")
         // Dock 图标与菜单栏并存，不能是 LSUIElement。

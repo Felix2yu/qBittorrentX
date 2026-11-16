@@ -13,7 +13,7 @@ build:
 # AppModel 不 import SwiftUI，所以本机能单独 typecheck 它——@Observable 的插件在，
 # 缺的只是 libSwiftUIMacros（@State/@Binding/@AppStorage）。并发边界因此有真实编译证据。
 check-model: build
-	swiftc -typecheck -swift-version 6 -target arm64-apple-macos26.0 \
+	swiftc -typecheck -swift-version 6 -default-isolation MainActor -target arm64-apple-macos27.0 \
 		-I .build/out/Products/Debug \
 		-load-plugin-library /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/libObservationMacros.dylib \
 		App/Sources/QBittorrentXUI/AppModel.swift

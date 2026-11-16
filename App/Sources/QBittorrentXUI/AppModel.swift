@@ -4,7 +4,8 @@ import QBKit
 
 /// UI 的唯一状态源。**主线程只做一次赋值**：过滤/排序/facet 全在 SyncEngine actor 内算完，
 /// 这里消费 `AsyncStream<Snapshot>` 把成品整体换上去。
-@MainActor
+///
+/// App target 启用 Swift 6.2 默认 MainActor 隔离，省略显式标注。
 @Observable
 public final class AppModel {
     // MARK: - 展示状态
@@ -142,7 +143,7 @@ public final class AppModel {
         pathChanged(expensive: path.isExpensive, constrained: path.isConstrained)
 
         let stream = await engine.snapshots()
-        consumeTask = Task { [weak self] in
+        consumeTask = Task(name: "AppModel.snapshotStream") { [weak self] in
             for await snapshot in stream {
                 self?.snapshot = snapshot
             }

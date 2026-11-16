@@ -1,6 +1,6 @@
 # qBittorrentX
 
-原生 macOS qBittorrent WebAPI 客户端。Swift 6 + SwiftUI，**最低 macOS 26 / qBittorrent 5.2**，不向下兼容（直接用 5.x 的 `stop`/`start` 与 `stoppedUP`/`stoppedDL`）。
+原生 macOS qBittorrent WebAPI 客户端。Swift 6.4 + SwiftUI，**最低 macOS 27 / qBittorrent 5.2**，不向下兼容（直接用 5.x 的 `stop`/`start` 与 `stoppedUP`/`stoppedDL`）。
 
 任务列表 + 多维筛选（状态/分类/标签/tracker）+ 多列排序，附带任务操作（启停/校验/删除/改分类标签/上传限速）与菜单栏速度常驻。**不含添加种子。** 另有一个**只读**的「历史」视图，检索 qbhive 的退休账本（见「qbhive 退休账本」）。
 

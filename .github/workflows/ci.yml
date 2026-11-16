@@ -16,12 +16,8 @@ concurrency:
 jobs:
   core:
     name: 核心包构建与测试
-    runs-on: macos-26
+    runs-on: macos-27
     timeout-minutes: 20
-    env:
-      # macos-26 是稳定镜像，默认 Xcode 26.6（macOS 26.5 SDK），
-      # 足以覆盖 Package.swift 的最低版本 macOS 26。xcode-27 仍是预览标签，不用于 CI。
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
 
@@ -40,10 +36,8 @@ jobs:
 
   app:
     name: App release 打包
-    runs-on: macos-26
+    runs-on: macos-27
     timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v5
 

@@ -198,7 +198,7 @@ public actor SyncEngine {
         guard loopTask == nil else { return }
         loopGeneration += 1
         let myGeneration = loopGeneration
-        loopTask = Task { [weak self] in
+        loopTask = Task(name: "SyncEngine.loop") { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 let interval = await self.tick()
